@@ -75,6 +75,29 @@ function nextNumber(list, prefix, field, agencePrefix = "", fiscalStartMonth = 1
   return `${fullPrefix}-${year}-${String(max + 1).padStart(3, "0")}`;
 }
 
+// Tri "naturel" : compare les segments numériques comme des nombres plutôt que
+// comme du texte, pour que PREST-002 se place bien après PREST-001-9, etc.
+function naturalCompare(a, b) {
+  const re = /(\d+)|(\D+)/g;
+  const chunksA = String(a || "").match(re) || [];
+  const chunksB = String(b || "").match(re) || [];
+  const len = Math.max(chunksA.length, chunksB.length);
+  for (let i = 0; i < len; i++) {
+    const ca = chunksA[i] ?? "";
+    const cb = chunksB[i] ?? "";
+    if (ca === cb) continue;
+    const na = /^\d+$/.test(ca) ? parseInt(ca, 10) : null;
+    const nb = /^\d+$/.test(cb) ? parseInt(cb, 10) : null;
+    if (na !== null && nb !== null) return na - nb;
+    return ca < cb ? -1 : 1;
+  }
+  return 0;
+}
+
+function sortByRef(list) {
+  return [...list].sort((a, b) => naturalCompare(a.ref, b.ref));
+}
+
 function daysSince(dateStr) {
   if (!dateStr) return 0;
   const d = new Date(dateStr);
@@ -1843,7 +1866,7 @@ function LinesEditor({ lignes, setLignes, catalog }) {
                       className="w-full py-1.5"
                     >
                       <option value="">— Libre —</option>
-                      {catalog.filter((c) => c.actif).map((c) => (
+                      {sortByRef(catalog.filter((c) => c.actif)).map((c) => (
                         <option key={c.id} value={c.ref}>{c.ref}</option>
                       ))}
                     </Select>
@@ -3292,7 +3315,7 @@ function CatalogTab({ catalog, saveCatalog }) {
             </tr>
           </thead>
           <tbody>
-            {catalog.map((c) => (
+            {sortByRef(catalog).map((c) => (
               <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-2.5 text-slate-500">{c.ref}</td>
                 <td className="px-4 py-2.5 font-medium text-slate-800">{c.designation}</td>
