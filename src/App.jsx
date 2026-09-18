@@ -1960,6 +1960,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
           html, body { height: auto !important; }
           body * { visibility: hidden; }
           .print-area, .print-area * { visibility: visible; }
+          main { display: none !important; }
           .no-print-parent { position: static !important; overflow: visible !important; height: auto !important; background: none !important; display: block !important; padding: 0 !important; }
           .print-area { position: static !important; width: 100% !important; padding: 0; margin: 0; box-shadow: none !important; }
           .no-print { display: none !important; }
@@ -3899,6 +3900,7 @@ function CGVPrintView({ cgv, settings, onClose }) {
           html, body { height: auto !important; }
           body * { visibility: hidden; }
           .print-area, .print-area * { visibility: visible; }
+          main { display: none !important; }
           .no-print-parent { position: static !important; overflow: visible !important; height: auto !important; background: none !important; display: block !important; padding: 0 !important; }
           .print-area { position: static !important; width: 100% !important; padding: 0; margin: 0; box-shadow: none !important; }
           .no-print { display: none !important; }
