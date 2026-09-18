@@ -1956,6 +1956,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
   return (
     <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-start justify-center overflow-y-auto py-2 sm:py-8 px-0 sm:px-4 no-print-parent">
       <style>{`
+        @page { margin: 8mm; }
         @media print {
           html, body { height: auto !important; }
           body * { visibility: hidden; }
@@ -2114,16 +2115,15 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
                 </div>
               </div>
               {cgv && (
-                <div className="cgv-annexe pt-4 mt-2 border-t-2 border-slate-800">
-                  <div className="text-xs font-bold text-slate-900 mb-0.5">CONDITIONS GÉNÉRALES DE VENTE</div>
-                  <div className="text-[7px] text-slate-500 mb-2">Version {settings.versionCGV} — {settings.entreprise} — annexées et applicables au présent devis</div>
-                  <p className="text-[7px] text-slate-600 leading-snug mb-2">{cgv.intro}</p>
-                  <div className="gap-x-4" style={{ columnCount: 2 }}>
+                <div className="cgv-annexe pt-3 mt-2 border-t-2 border-slate-800">
+                  <div className="text-[10px] font-bold text-slate-900 mb-0.5">CONDITIONS GÉNÉRALES DE VENTE</div>
+                  <div className="text-[6px] text-slate-500 mb-1.5">Version {settings.versionCGV} — {settings.entreprise} — annexées et applicables au présent devis</div>
+                  <p className="text-[6px] text-slate-600 leading-tight mb-1.5">{cgv.intro}</p>
+                  <div className="gap-x-3" style={{ columnCount: 3 }}>
                     {cgv.articles.map((a, i) => (
-                      <div key={i} style={{ breakInside: "avoid" }} className="mb-1.5">
-                        <div className="font-semibold text-slate-800 text-[7px] leading-snug">{a.titre}</div>
-                        <p className="text-[7px] text-slate-600 leading-snug">{a.texte}</p>
-                      </div>
+                      <p key={i} style={{ breakInside: "avoid" }} className="text-[6px] text-slate-600 leading-tight mb-1">
+                        <span className="font-semibold text-slate-800">{a.titre} — </span>{a.texte}
+                      </p>
                     ))}
                   </div>
                 </div>
@@ -3896,6 +3896,7 @@ function CGVPrintView({ cgv, settings, onClose }) {
   return (
     <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-start justify-center overflow-y-auto py-2 sm:py-8 px-0 sm:px-4 no-print-parent">
       <style>{`
+        @page { margin: 8mm; }
         @media print {
           html, body { height: auto !important; }
           body * { visibility: hidden; }
@@ -3921,18 +3922,17 @@ function CGVPrintView({ cgv, settings, onClose }) {
               <><Zap size={20} className="text-amber-500" /> {settings.entreprise}</>
             )}
           </div>
-          <div className="text-lg font-bold text-slate-900 mt-4">CONDITIONS GÉNÉRALES DE VENTE</div>
-          <div className="text-xs text-slate-500 mb-4">Version {settings.versionCGV} — {settings.entreprise}</div>
-          <p className="text-[7px] text-slate-600 leading-snug mb-2">{cgv.intro}</p>
-          <div className="gap-x-4" style={{ columnCount: 2 }}>
+          <div className="text-sm font-bold text-slate-900 mt-2">CONDITIONS GÉNÉRALES DE VENTE</div>
+          <div className="text-[8px] text-slate-500 mb-1.5">Version {settings.versionCGV} — {settings.entreprise}</div>
+          <p className="text-[6px] text-slate-600 leading-tight mb-1.5">{cgv.intro}</p>
+          <div className="gap-x-3" style={{ columnCount: 3 }}>
             {cgv.articles.map((a, i) => (
-              <div key={i} style={{ breakInside: "avoid" }} className="mb-1.5">
-                <div className="font-semibold text-slate-800 text-[7px] leading-snug">{a.titre}</div>
-                <p className="text-[7px] text-slate-600 leading-snug">{a.texte}</p>
-              </div>
+              <p key={i} style={{ breakInside: "avoid" }} className="text-[6px] text-slate-600 leading-tight mb-1">
+                <span className="font-semibold text-slate-800">{a.titre} — </span>{a.texte}
+              </p>
             ))}
           </div>
-          <div className="text-[10px] text-slate-400 text-center border-t border-slate-200 pt-2 mt-6">
+          <div className="text-[7px] text-slate-400 text-center border-t border-slate-200 pt-1.5 mt-2">
             Document proposé comme base de travail — validation juridique recommandée avant diffusion.
           </div>
         </div>
