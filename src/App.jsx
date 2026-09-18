@@ -1945,6 +1945,28 @@ function LinesEditor({ lignes, setLignes, catalog }) {
 /* Printable document                                                     */
 /* ---------------------------------------------------------------------- */
 
+// Répartit une liste d'articles en N colonnes aussi équilibrées que possible
+// (en cumulant la longueur du texte plutôt que le simple nombre d'articles),
+// pour un rendu en flexbox fiable à l'impression (contrairement à CSS
+// column-count, mal supporté par les moteurs d'impression des navigateurs).
+function splitIntoColumns(articles, n) {
+  const totalLen = articles.reduce((s, a) => s + a.titre.length + a.texte.length, 0);
+  const target = totalLen / n;
+  const cols = Array.from({ length: n }, () => []);
+  let colIdx = 0;
+  let colLen = 0;
+  articles.forEach((a) => {
+    const len = a.titre.length + a.texte.length;
+    if (colLen > target && colIdx < n - 1) {
+      colIdx += 1;
+      colLen = 0;
+    }
+    cols[colIdx].push(a);
+    colLen += len;
+  });
+  return cols;
+}
+
 function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
   const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
   const isDevis = type === "devis";
@@ -2119,11 +2141,15 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
                   <div className="text-[10px] font-bold text-slate-900 mb-0.5">CONDITIONS GÉNÉRALES DE VENTE</div>
                   <div className="text-[6px] text-slate-500 mb-1.5">Version {settings.versionCGV} — {settings.entreprise} — annexées et applicables au présent devis</div>
                   <p className="text-[6px] text-slate-600 leading-tight mb-1.5">{cgv.intro}</p>
-                  <div className="gap-x-3" style={{ columnCount: 3 }}>
-                    {cgv.articles.map((a, i) => (
-                      <p key={i} style={{ breakInside: "avoid" }} className="text-[6px] text-slate-600 leading-tight mb-1">
-                        <span className="font-semibold text-slate-800">{a.titre} — </span>{a.texte}
-                      </p>
+                  <div className="flex gap-x-3">
+                    {splitIntoColumns(cgv.articles, 3).map((col, ci) => (
+                      <div key={ci} className="flex-1 min-w-0">
+                        {col.map((a, i) => (
+                          <p key={i} className="text-[6px] text-slate-600 leading-tight mb-1">
+                            <span className="font-semibold text-slate-800">{a.titre} — </span>{a.texte}
+                          </p>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -3925,11 +3951,15 @@ function CGVPrintView({ cgv, settings, onClose }) {
           <div className="text-sm font-bold text-slate-900 mt-2">CONDITIONS GÉNÉRALES DE VENTE</div>
           <div className="text-[8px] text-slate-500 mb-1.5">Version {settings.versionCGV} — {settings.entreprise}</div>
           <p className="text-[6px] text-slate-600 leading-tight mb-1.5">{cgv.intro}</p>
-          <div className="gap-x-3" style={{ columnCount: 3 }}>
-            {cgv.articles.map((a, i) => (
-              <p key={i} style={{ breakInside: "avoid" }} className="text-[6px] text-slate-600 leading-tight mb-1">
-                <span className="font-semibold text-slate-800">{a.titre} — </span>{a.texte}
-              </p>
+          <div className="flex gap-x-3">
+            {splitIntoColumns(cgv.articles, 3).map((col, ci) => (
+              <div key={ci} className="flex-1 min-w-0">
+                {col.map((a, i) => (
+                  <p key={i} className="text-[6px] text-slate-600 leading-tight mb-1">
+                    <span className="font-semibold text-slate-800">{a.titre} — </span>{a.texte}
+                  </p>
+                ))}
+              </div>
             ))}
           </div>
           <div className="text-[7px] text-slate-400 text-center border-t border-slate-200 pt-1.5 mt-2">
