@@ -2292,7 +2292,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         <Field label="Client" className="md:col-span-2">
           <Select value={doc.clientId} onChange={(e) => setDoc({ ...doc, clientId: e.target.value })}>
             <option value="">— Sélectionner —</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
+            {[...clients].sort((a, b) => a.societe.localeCompare(b.societe, "fr", { sensitivity: "base" })).map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
           </Select>
           <PartyDetailsCard
             party={clients.find((c) => c.id === doc.clientId) || null}
@@ -2393,7 +2393,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
         <Field label="Client" className="md:col-span-2">
           <Select value={doc.clientId} onChange={(e) => setDoc({ ...doc, clientId: e.target.value })}>
             <option value="">— Sélectionner —</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
+            {[...clients].sort((a, b) => a.societe.localeCompare(b.societe, "fr", { sensitivity: "base" })).map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
           </Select>
           <PartyDetailsCard
             party={clients.find((c) => c.id === doc.clientId) || null}
@@ -2785,7 +2785,7 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
         <Field label="Fournisseur" className="md:col-span-2">
           <Select value={doc.fournisseurId} onChange={(e) => setDoc({ ...doc, fournisseurId: e.target.value })}>
             <option value="">— Sélectionner —</option>
-            {fournisseurs.map((f) => <option key={f.id} value={f.id}>{f.raisonSociale}</option>)}
+            {[...fournisseurs].sort((a, b) => a.raisonSociale.localeCompare(b.raisonSociale, "fr", { sensitivity: "base" })).map((f) => <option key={f.id} value={f.id}>{f.raisonSociale}</option>)}
           </Select>
           <PartyDetailsCard
             party={fournisseurs.find((f) => f.id === doc.fournisseurId) || null}
@@ -2811,7 +2811,7 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
             <Field label="Chantier / site (base clients)">
               <Select value={doc.chantierId} onChange={(e) => setDoc({ ...doc, chantierId: e.target.value })}>
                 <option value="">— Aucun —</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
+                {[...clients].sort((a, b) => a.societe.localeCompare(b.societe, "fr", { sensitivity: "base" })).map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
               </Select>
             </Field>
             <Field label="Repère / référence chantier">
@@ -3112,6 +3112,43 @@ function parseCatalogFromRows(headers, rows) {
 /* Clients tab                                                            */
 /* ---------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------- */
+/* Index alphabétique (navigation rapide dans une longue liste)           */
+/* ---------------------------------------------------------------------- */
+
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+function firstLetterOf(text) {
+  const c = String(text || "").trim().charAt(0).toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /[A-Z]/.test(c) ? c : "#";
+}
+
+function AlphabetIndex({ available, anchorPrefix }) {
+  const scrollTo = (letter) => {
+    const el = document.getElementById(`${anchorPrefix}-${letter}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  return (
+    <div className="fixed left-1 md:left-64 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center bg-white/95 backdrop-blur border border-slate-200 rounded-full py-2 px-0.5 shadow-sm no-print">
+      {ALPHABET.map((l) => {
+        const has = available.has(l);
+        return (
+          <button
+            key={l}
+            type="button"
+            onClick={() => has && scrollTo(l)}
+            disabled={!has}
+            className={`text-[9px] leading-none w-4 h-[13px] flex items-center justify-center ${has ? "text-slate-500 hover:text-amber-600 font-semibold" : "text-slate-200"}`}
+          >
+            {l}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ClientsTab({ clients, saveClients, devisList, facturesList, commandesList, settings, openPreview }) {
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
@@ -3204,9 +3241,12 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
     }
   };
 
-  const filtered = clients.filter((c) =>
-    `${c.societe} ${c.ville} ${c.contact}`.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = clients
+    .filter((c) => `${c.societe} ${c.ville} ${c.contact}`.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => a.societe.localeCompare(b.societe, "fr", { sensitivity: "base" }));
+
+  const availableLetters = useMemo(() => new Set(filtered.map((c) => firstLetterOf(c.societe))), [filtered]);
+  const seenLetters = new Set();
 
   if (viewing) {
     return (
@@ -3269,6 +3309,8 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
         </div>
       )}
 
+      <AlphabetIndex available={availableLetters} anchorPrefix="client-az" />
+
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -3283,8 +3325,12 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
             </tr>
           </thead>
           <tbody>
-            {filtered.slice(0, 300).map((c) => (
-              <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
+            {filtered.map((c) => {
+              const letter = firstLetterOf(c.societe);
+              const isFirstOfLetter = !seenLetters.has(letter);
+              if (isFirstOfLetter) seenLetters.add(letter);
+              return (
+              <tr key={c.id} id={isFirstOfLetter ? `client-az-${letter}` : undefined} className="border-t border-slate-100 hover:bg-slate-50 scroll-mt-20">
                 <td className="px-4 py-2.5 text-slate-500">{c.code}</td>
                 <td className="px-4 py-2.5">
                   <button onClick={() => setViewing(c)} className="font-medium text-slate-800 hover:text-amber-600 hover:underline text-left">
@@ -3302,18 +3348,14 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {filtered.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Aucun client. Ajoutez-en un ou importez le référentiel.</td></tr>
             )}
           </tbody>
         </table>
         </div>
-        {filtered.length > 300 && (
-          <div className="px-4 py-2 text-xs text-slate-400 border-t border-slate-100">
-            {filtered.length - 300} résultat(s) supplémentaire(s) — affinez la recherche pour les voir.
-          </div>
-        )}
       </div>
     </div>
   );
@@ -3666,9 +3708,12 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
     }
   };
 
-  const filtered = fournisseurs.filter((f) =>
-    `${f.raisonSociale} ${f.specialite} ${f.marques}`.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = fournisseurs
+    .filter((f) => `${f.raisonSociale} ${f.specialite} ${f.marques}`.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => a.raisonSociale.localeCompare(b.raisonSociale, "fr", { sensitivity: "base" }));
+
+  const availableLetters = useMemo(() => new Set(filtered.map((f) => firstLetterOf(f.raisonSociale))), [filtered]);
+  const seenLetters = new Set();
 
   return (
     <div>
@@ -3718,6 +3763,8 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
         </div>
       )}
 
+      <AlphabetIndex available={availableLetters} anchorPrefix="fourn-az" />
+
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -3732,8 +3779,12 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((f) => (
-              <tr key={f.id} className="border-t border-slate-100 hover:bg-slate-50">
+            {filtered.map((f) => {
+              const letter = firstLetterOf(f.raisonSociale);
+              const isFirstOfLetter = !seenLetters.has(letter);
+              if (isFirstOfLetter) seenLetters.add(letter);
+              return (
+              <tr key={f.id} id={isFirstOfLetter ? `fourn-az-${letter}` : undefined} className="border-t border-slate-100 hover:bg-slate-50 scroll-mt-20">
                 <td className="px-4 py-2.5 font-medium text-slate-800">{f.raisonSociale}</td>
                 <td className="px-4 py-2.5 text-slate-600">{f.specialite}</td>
                 <td className="px-4 py-2.5 text-slate-600">{f.contact}</td>
@@ -3746,7 +3797,8 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {filtered.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Aucun fournisseur. Ajoutez-en un ou importez le référentiel.</td></tr>
             )}
