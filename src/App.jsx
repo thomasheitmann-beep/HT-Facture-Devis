@@ -3054,6 +3054,60 @@ function parseClientsFromRows(headers, rows) {
     .filter((c) => c.societe);
 }
 
+function parseFournisseursFromRows(headers, rows) {
+  const idx = {
+    raisonSociale: findHeaderIndex(headers, ["raison sociale", "société", "societe", "fournisseur", "company", "entreprise", "nom"]),
+    specialite: findHeaderIndex(headers, ["spécialité", "specialite", "type de pièces", "type de pieces"]),
+    marques: findHeaderIndex(headers, ["marques", "marque"]),
+    prenom: findHeaderIndex(headers, ["prénom", "prenom"]),
+    nom: findHeaderIndex(headers, ["nom du contact", "contact"]),
+    adresse: findHeaderIndex(headers, ["adresse", "address"]),
+    email: findHeaderIndex(headers, ["e-mail", "email", "mail"]),
+    telFixe: findHeaderIndex(headers, ["téléphone fixe", "telephone fixe", "téléphone", "telephone", "tel"]),
+    telPortable: findHeaderIndex(headers, ["téléphone portable", "telephone portable", "mobile", "portable"]),
+    cp: findHeaderIndex(headers, ["code postal", "cp", "postal code", "zip"]),
+    ville: findHeaderIndex(headers, ["ville", "city"]),
+  };
+  const get = (row, i) => (i === -1 || i === undefined ? "" : String(row[i] ?? "").trim());
+  const telIdx = idx.telFixe !== -1 ? idx.telFixe : idx.telPortable;
+
+  return rows
+    .map((row) => {
+      const contactCombine = `${get(row, idx.prenom)} ${get(row, idx.nom)}`.trim();
+      return {
+        raisonSociale: get(row, idx.raisonSociale),
+        specialite: get(row, idx.specialite),
+        marques: get(row, idx.marques),
+        contact: contactCombine || get(row, idx.nom),
+        adresse: get(row, idx.adresse),
+        cp: get(row, idx.cp),
+        ville: get(row, idx.ville) || parseCityFromAddress(get(row, idx.adresse)),
+        email: get(row, idx.email),
+        telephone: get(row, telIdx),
+      };
+    })
+    .filter((f) => f.raisonSociale);
+}
+
+function parseCatalogFromRows(headers, rows) {
+  const idx = {
+    ref: findHeaderIndex(headers, ["référence", "reference", "ref", "code"]),
+    designation: findHeaderIndex(headers, ["désignation", "designation", "libellé", "libelle", "nom", "prestation"]),
+    unite: findHeaderIndex(headers, ["unité", "unite", "unit"]),
+    prixHT: findHeaderIndex(headers, ["prix ht", "prix unitaire ht", "prix unitaire", "prix", "tarif"]),
+  };
+  const get = (row, i) => (i === -1 || i === undefined ? "" : String(row[i] ?? "").trim());
+
+  return rows
+    .map((row) => ({
+      ref: get(row, idx.ref),
+      designation: get(row, idx.designation),
+      unite: get(row, idx.unite),
+      prixHT: get(row, idx.prixHT).replace(",", ".").replace(/[^\d.-]/g, ""),
+    }))
+    .filter((p) => p.designation);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Clients tab                                                            */
 /* ---------------------------------------------------------------------- */
@@ -3370,6 +3424,8 @@ function ClientDossier({ client, devisList, facturesList, commandesList, setting
 
 function CatalogTab({ catalog, saveCatalog }) {
   const [editing, setEditing] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   const blank = () => ({
     id: uid(),
@@ -3390,12 +3446,82 @@ function CatalogTab({ catalog, saveCatalog }) {
 
   const toggleActif = (p) => saveCatalog(catalog.map((c) => (c.id === p.id ? { ...c, actif: !c.actif } : c)));
 
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  const handleFileImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      if (!rows.length) {
+        alert(`"${file.name}" semble vide.`);
+        return;
+      }
+      const headers = rows[0].map((h) => String(h ?? ""));
+      const parsed = parseCatalogFromRows(headers, rows.slice(1));
+
+      if (parsed.length === 0) {
+        alert(`Aucune colonne reconnue dans "${file.name}". Attendu au minimum une colonne désignation.`);
+        return;
+      }
+
+      const seenInBatch = new Set();
+      const uniqueParsed = parsed.filter((p) => {
+        const k = (p.ref || p.designation).toUpperCase();
+        if (seenInBatch.has(k)) return false;
+        seenInBatch.add(k);
+        return true;
+      });
+
+      const existingKeys = new Set(catalog.map((c) => (c.ref || c.designation).toUpperCase()));
+      const toAdd = uniqueParsed.filter((p) => !existingKeys.has((p.ref || p.designation).toUpperCase()));
+
+      if (toAdd.length === 0) {
+        alert(`"${file.name}" lu (${uniqueParsed.length} prestation(s) identifiée(s)) — toutes sont déjà présentes.`);
+        return;
+      }
+
+      if (!confirm(`"${file.name}" : ${toAdd.length} nouvelle(s) prestation(s) trouvée(s) sur ${uniqueParsed.length} identifiée(s). Les importer ?`)) return;
+
+      const withIds = toAdd.map((p, i) => ({
+        id: uid(),
+        ref: p.ref || `PREST-${String(catalog.length + i + 1).padStart(3, "0")}`,
+        designation: p.designation, unite: p.unite || "", prixHT: Number(p.prixHT) || 0, actif: true,
+      }));
+      saveCatalog([...catalog, ...withIds]);
+    } catch (err) {
+      alert(`Impossible de lire "${file.name}". Formats acceptés : .xlsx, .xls, .csv`);
+    } finally {
+      setImporting(false);
+      e.target.value = "";
+    }
+  };
+
   return (
     <div>
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-1">
         <h3 className="font-semibold text-slate-800">Catalogue des prestations</h3>
-        <Btn variant="primary" onClick={() => setEditing(blank())}><Plus size={15} /> Nouvelle prestation</Btn>
+        <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+            onChange={handleFileImport}
+            className="hidden"
+          />
+          <Btn variant="outline" onClick={openFilePicker} disabled={importing}>
+            <Upload size={15} /> {importing ? "Lecture…" : "Importer un fichier"}
+          </Btn>
+          <Btn variant="primary" onClick={() => setEditing(blank())}><Plus size={15} /> Nouvelle prestation</Btn>
+        </div>
       </div>
+      <p className="text-xs text-slate-400 mb-4">
+        Import de fichier : .xlsx, .xls ou .csv — colonnes reconnues automatiquement (référence, désignation, unité, prix HT).
+      </p>
 
       {editing && (
         <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
@@ -3460,6 +3586,8 @@ function CatalogTab({ catalog, saveCatalog }) {
 function FournisseursTab({ fournisseurs, saveFournisseurs }) {
   const [editing, setEditing] = useState(null);
   const [query, setQuery] = useState("");
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   const blank = () => ({
     id: uid(), raisonSociale: "", specialite: "", marques: "", contact: "",
@@ -3488,6 +3616,56 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
     saveFournisseurs([...fournisseurs, ...toAdd.map((f) => ({ ...f, id: uid() }))]);
   };
 
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  const handleFileImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      if (!rows.length) {
+        alert(`"${file.name}" semble vide.`);
+        return;
+      }
+      const headers = rows[0].map((h) => String(h ?? ""));
+      const parsed = parseFournisseursFromRows(headers, rows.slice(1));
+
+      if (parsed.length === 0) {
+        alert(`Aucune colonne reconnue dans "${file.name}". Attendu au minimum une colonne raison sociale/fournisseur.`);
+        return;
+      }
+
+      const seenInBatch = new Set();
+      const uniqueParsed = parsed.filter((f) => {
+        const k = f.raisonSociale.toUpperCase();
+        if (seenInBatch.has(k)) return false;
+        seenInBatch.add(k);
+        return true;
+      });
+
+      const existingKeys = new Set(fournisseurs.map((f) => f.raisonSociale.toUpperCase()));
+      const toAdd = uniqueParsed.filter((f) => !existingKeys.has(f.raisonSociale.toUpperCase()));
+
+      if (toAdd.length === 0) {
+        alert(`"${file.name}" lu (${uniqueParsed.length} fournisseur(s) identifié(s)) — tous sont déjà présents.`);
+        return;
+      }
+
+      if (!confirm(`"${file.name}" : ${toAdd.length} nouveau(x) fournisseur(s) trouvé(s) sur ${uniqueParsed.length} identifié(s). Les importer ?`)) return;
+
+      saveFournisseurs([...fournisseurs, ...toAdd.map((f) => ({ ...f, id: uid() }))]);
+    } catch (err) {
+      alert(`Impossible de lire "${file.name}". Formats acceptés : .xlsx, .xls, .csv`);
+    } finally {
+      setImporting(false);
+      e.target.value = "";
+    }
+  };
+
   const filtered = fournisseurs.filter((f) =>
     `${f.raisonSociale} ${f.specialite} ${f.marques}`.toLowerCase().includes(query.toLowerCase())
   );
@@ -3497,10 +3675,23 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-slate-800">Fournisseurs ({fournisseurs.length})</h3>
         <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+            onChange={handleFileImport}
+            className="hidden"
+          />
+          <Btn variant="outline" onClick={openFilePicker} disabled={importing}>
+            <Upload size={15} /> {importing ? "Lecture…" : "Importer un fichier"}
+          </Btn>
           <Btn variant="outline" onClick={importReferentiel}><Upload size={15} /> Importer le référentiel</Btn>
           <Btn variant="primary" onClick={() => setEditing(blank())}><Plus size={15} /> Nouveau fournisseur</Btn>
         </div>
       </div>
+      <p className="text-xs text-slate-400 mb-4">
+        Import de fichier : .xlsx, .xls ou .csv — colonnes reconnues automatiquement (raison sociale, spécialité, marques, contact, adresse, code postal, ville, e-mail, téléphone).
+      </p>
 
       <div className="relative w-full sm:w-72 mb-4">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
