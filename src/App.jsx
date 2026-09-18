@@ -1957,9 +1957,11 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
     <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-start justify-center overflow-y-auto py-2 sm:py-8 px-0 sm:px-4 no-print-parent">
       <style>{`
         @media print {
+          html, body { height: auto !important; }
           body * { visibility: hidden; }
           .print-area, .print-area * { visibility: visible; }
-          .print-area { position: absolute; top: 0; left: 0; width: 100%; padding: 0; margin: 0; box-shadow: none !important; }
+          .no-print-parent { position: static !important; overflow: visible !important; height: auto !important; background: none !important; display: block !important; padding: 0 !important; }
+          .print-area { position: static !important; width: 100% !important; padding: 0; margin: 0; box-shadow: none !important; }
           .no-print { display: none !important; }
           .cgv-annexe { page-break-before: always; break-before: page; }
         }
@@ -2158,7 +2160,82 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
 /* Devis form                                                             */
 /* ---------------------------------------------------------------------- */
 
-function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onCancel }) {
+/* ---------------------------------------------------------------------- */
+/* Fiche détaillée client / fournisseur (affichage + correction inline)   */
+/* ---------------------------------------------------------------------- */
+
+const CLIENT_DETAIL_FIELDS = [
+  { key: "contact", label: "Contact" },
+  { key: "telephone", label: "Téléphone" },
+  { key: "email", label: "E-mail" },
+  { key: "adresse", label: "Adresse", wide: true },
+  { key: "cp", label: "Code postal" },
+  { key: "ville", label: "Ville" },
+];
+
+const FOURNISSEUR_DETAIL_FIELDS = [
+  { key: "contact", label: "Contact" },
+  { key: "telephone", label: "Téléphone" },
+  { key: "email", label: "E-mail" },
+  { key: "specialite", label: "Spécialité", wide: true },
+  { key: "marques", label: "Marques", wide: true },
+  { key: "adresse", label: "Adresse", wide: true },
+  { key: "cp", label: "Code postal" },
+  { key: "ville", label: "Ville" },
+];
+
+function PartyDetailsCard({ party, fields, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(party);
+
+  useEffect(() => {
+    setForm(party);
+    setEditing(false);
+  }, [party?.id]);
+
+  if (!party) return null;
+
+  if (editing) {
+    return (
+      <div className="border border-slate-200 rounded-xl p-4 mt-2 bg-slate-50">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+          {fields.map((f) => (
+            <Field key={f.key} label={f.label} className={f.wide ? "sm:col-span-2" : ""}>
+              <TextInput value={form[f.key] || ""} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
+            </Field>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Btn variant="outline" onClick={() => { setForm(party); setEditing(false); }}>Annuler</Btn>
+          <Btn variant="primary" onClick={() => { onSave(form); setEditing(false); }}><Check size={15} /> Enregistrer</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  const hasAny = fields.some((f) => party[f.key]);
+
+  return (
+    <div className="border border-slate-200 rounded-xl p-3 mt-2 bg-slate-50 text-sm">
+      <div className="flex items-start justify-between gap-2">
+        {hasAny ? (
+          <div className="text-slate-600 space-y-0.5">
+            {fields.map((f) => (party[f.key] ? (
+              <div key={f.key}><span className="text-slate-400">{f.label} : </span>{party[f.key]}</div>
+            ) : null))}
+          </div>
+        ) : (
+          <div className="text-slate-400 italic">Aucune information complémentaire renseignée.</div>
+        )}
+        <button type="button" onClick={() => setEditing(true)} title="Corriger ces informations" className="text-slate-400 hover:text-slate-700 shrink-0 p-1">
+          <Pencil size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onCancel, onConvert, saveClients }) {
   const [doc, setDoc] = useState(
     initial || {
       id: uid(),
@@ -2179,12 +2256,22 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h3 className="font-semibold text-slate-800 flex items-center gap-2">
           <FileText size={18} className="text-amber-500" />
           {initial ? `Modifier ${doc.numero}` : "Nouveau devis"}
         </h3>
-        <Btn variant="ghost" onClick={onCancel}><ChevronLeft size={15} /> Retour à la liste</Btn>
+        <div className="flex items-center gap-2">
+          {initial && (
+            <button
+              onClick={() => onConvert(initial)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+            >
+              <ArrowRightLeft size={15} /> Convertir en facture
+            </button>
+          )}
+          <Btn variant="ghost" onClick={onCancel}><ChevronLeft size={15} /> Retour à la liste</Btn>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -2207,6 +2294,11 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
             <option value="">— Sélectionner —</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
           </Select>
+          <PartyDetailsCard
+            party={clients.find((c) => c.id === doc.clientId) || null}
+            fields={CLIENT_DETAIL_FIELDS}
+            onSave={(updated) => saveClients(clients.map((c) => (c.id === updated.id ? updated : c)))}
+          />
         </Field>
         <Field label="Objet" className="md:col-span-2">
           <TextInput value={doc.objet} onChange={(e) => setDoc({ ...doc, objet: e.target.value })} />
@@ -2248,7 +2340,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
 /* Facture form                                                           */
 /* ---------------------------------------------------------------------- */
 
-function FactureForm({ initial, clients, catalog, facturesList, settings, onSave, onCancel }) {
+function FactureForm({ initial, clients, catalog, facturesList, settings, onSave, onCancel, saveClients }) {
   const [doc, setDoc] = useState(
     initial || {
       id: uid(),
@@ -2303,6 +2395,11 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
             <option value="">— Sélectionner —</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
           </Select>
+          <PartyDetailsCard
+            party={clients.find((c) => c.id === doc.clientId) || null}
+            fields={CLIENT_DETAIL_FIELDS}
+            onSave={(updated) => saveClients(clients.map((c) => (c.id === updated.id ? updated : c)))}
+          />
         </Field>
         <Field label="Objet" className="md:col-span-2">
           <TextInput value={doc.objet} onChange={(e) => setDoc({ ...doc, objet: e.target.value })} />
@@ -2343,7 +2440,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
 /* Devis tab                                                              */
 /* ---------------------------------------------------------------------- */
 
-function DevisTab({ devisList, saveDevisList, clients, catalog, settings, facturesList, saveFacturesList, openPreview }) {
+function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, settings, facturesList, saveFacturesList, openPreview }) {
   const [editing, setEditing] = useState(null); // null | 'new' | devis object
   const [query, setQuery] = useState("");
   const [converting, setConverting] = useState(null); // devis being converted
@@ -2410,11 +2507,13 @@ function DevisTab({ devisList, saveDevisList, clients, catalog, settings, factur
       <DevisForm
         initial={editing === "new" ? null : editing}
         clients={clients}
+        saveClients={saveClients}
         catalog={catalog}
         devisList={devisList}
         settings={settings}
         onSave={handleSave}
         onCancel={() => setEditing(null)}
+        onConvert={(d) => { setEditing(null); setConverting(d); }}
       />
     );
   }
@@ -2457,12 +2556,17 @@ function DevisTab({ devisList, saveDevisList, clients, catalog, settings, factur
                   <td className="px-4 py-2.5"><StatusBadge statut={d.statut} /></td>
                   <td className="px-4 py-2.5 text-right font-medium text-slate-800">{money(t.ttc)}</td>
                   <td className="px-4 py-2.5">
-                    <div className="flex justify-end gap-1">
-                      <button title="Aperçu / Imprimer" onClick={() => openPreview("devis", d)} className="p-1.5 text-slate-400 hover:text-amber-600"><Printer size={15} /></button>
-                      <button title="Modifier" onClick={() => setEditing(d)} className="p-1.5 text-slate-400 hover:text-slate-700"><Pencil size={15} /></button>
-                      <button title="Dupliquer" onClick={() => duplicate(d)} className="p-1.5 text-slate-400 hover:text-slate-700"><Copy size={15} /></button>
-                      <button title="Convertir en facture" onClick={() => setConverting(d)} className="p-1.5 text-slate-400 hover:text-emerald-600"><ArrowRightLeft size={15} /></button>
-                      <button title="Supprimer" onClick={() => remove(d.id)} className="p-1.5 text-slate-400 hover:text-red-600"><Trash2 size={15} /></button>
+                    <div className="flex justify-end items-center gap-1.5 flex-wrap">
+                      <button
+                        onClick={() => setConverting(d)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 whitespace-nowrap"
+                      >
+                        <ArrowRightLeft size={13} /> Facturer
+                      </button>
+                      <button title="Aperçu / Imprimer" onClick={() => openPreview("devis", d)} className="p-2 text-slate-400 hover:text-amber-600"><Printer size={16} /></button>
+                      <button title="Modifier" onClick={() => setEditing(d)} className="p-2 text-slate-400 hover:text-slate-700"><Pencil size={16} /></button>
+                      <button title="Dupliquer" onClick={() => duplicate(d)} className="p-2 text-slate-400 hover:text-slate-700"><Copy size={16} /></button>
+                      <button title="Supprimer" onClick={() => remove(d.id)} className="p-2 text-slate-400 hover:text-red-600"><Trash2 size={16} /></button>
                     </div>
                   </td>
                 </tr>
@@ -2518,7 +2622,7 @@ function ConvertModal({ devis, onCancel, onConfirm }) {
 /* Facture tab                                                            */
 /* ---------------------------------------------------------------------- */
 
-function FacturesTab({ facturesList, saveFacturesList, clients, catalog, settings, openPreview }) {
+function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, catalog, settings, openPreview }) {
   const [editing, setEditing] = useState(null);
   const [query, setQuery] = useState("");
 
@@ -2555,6 +2659,7 @@ function FacturesTab({ facturesList, saveFacturesList, clients, catalog, setting
       <FactureForm
         initial={editing === "new" ? null : editing}
         clients={clients}
+        saveClients={saveClients}
         catalog={catalog}
         facturesList={facturesList}
         settings={settings}
@@ -2631,7 +2736,7 @@ function FacturesTab({ facturesList, saveFacturesList, clients, catalog, setting
 /* Commande d'achat fournisseur (bon de commande)                         */
 /* ---------------------------------------------------------------------- */
 
-function CommandeForm({ initial, fournisseurs, clients, commandesList, settings, onSave, onCancel }) {
+function CommandeForm({ initial, fournisseurs, clients, commandesList, settings, onSave, onCancel, saveFournisseurs }) {
   const [doc, setDoc] = useState(
     initial || {
       id: uid(),
@@ -2682,6 +2787,11 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
             <option value="">— Sélectionner —</option>
             {fournisseurs.map((f) => <option key={f.id} value={f.id}>{f.raisonSociale}</option>)}
           </Select>
+          <PartyDetailsCard
+            party={fournisseurs.find((f) => f.id === doc.fournisseurId) || null}
+            fields={FOURNISSEUR_DETAIL_FIELDS}
+            onSave={(updated) => saveFournisseurs(fournisseurs.map((f) => (f.id === updated.id ? updated : f)))}
+          />
         </Field>
         <Field label="Objet" className="md:col-span-2">
           <TextInput value={doc.objet} onChange={(e) => setDoc({ ...doc, objet: e.target.value })} />
@@ -2739,7 +2849,7 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
   );
 }
 
-function CommandesTab({ commandesList, saveCommandesList, fournisseurs, clients, settings, openPreview }) {
+function CommandesTab({ commandesList, saveCommandesList, fournisseurs, saveFournisseurs, clients, settings, openPreview }) {
   const [editing, setEditing] = useState(null);
   const [query, setQuery] = useState("");
 
@@ -2778,6 +2888,7 @@ function CommandesTab({ commandesList, saveCommandesList, fournisseurs, clients,
       <CommandeForm
         initial={editing === "new" ? null : editing}
         fournisseurs={fournisseurs}
+        saveFournisseurs={saveFournisseurs}
         clients={clients}
         commandesList={commandesList}
         settings={settings}
@@ -3542,9 +3653,11 @@ function CGVPrintView({ cgv, settings, onClose }) {
     <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-start justify-center overflow-y-auto py-2 sm:py-8 px-0 sm:px-4 no-print-parent">
       <style>{`
         @media print {
+          html, body { height: auto !important; }
           body * { visibility: hidden; }
           .print-area, .print-area * { visibility: visible; }
-          .print-area { position: absolute; top: 0; left: 0; width: 100%; padding: 0; margin: 0; box-shadow: none !important; }
+          .no-print-parent { position: static !important; overflow: visible !important; height: auto !important; background: none !important; display: block !important; padding: 0 !important; }
+          .print-area { position: static !important; width: 100% !important; padding: 0; margin: 0; box-shadow: none !important; }
           .no-print { display: none !important; }
         }
       `}</style>
@@ -4225,7 +4338,7 @@ export default function App() {
         {tab === "devis" && (
           <DevisTab
             devisList={devisList} saveDevisList={saveDevisList}
-            clients={clients} catalog={catalog} settings={settings}
+            clients={clients} saveClients={saveClients} catalog={catalog} settings={settings}
             facturesList={facturesList} saveFacturesList={saveFacturesList}
             openPreview={openPreview}
           />
@@ -4233,14 +4346,14 @@ export default function App() {
         {tab === "factures" && (
           <FacturesTab
             facturesList={facturesList} saveFacturesList={saveFacturesList}
-            clients={clients} catalog={catalog} settings={settings}
+            clients={clients} saveClients={saveClients} catalog={catalog} settings={settings}
             openPreview={openPreview}
           />
         )}
         {tab === "achats" && (
           <CommandesTab
             commandesList={commandesList} saveCommandesList={saveCommandesList}
-            fournisseurs={fournisseurs} clients={clients} settings={settings}
+            fournisseurs={fournisseurs} saveFournisseurs={saveFournisseurs} clients={clients} settings={settings}
             openPreview={openPreview}
           />
         )}
