@@ -1962,7 +1962,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
           .print-area, .print-area * { visibility: visible; }
           main { display: none !important; }
           .no-print-parent { position: static !important; overflow: visible !important; height: auto !important; background: none !important; display: block !important; padding: 0 !important; }
-          .print-area { position: static !important; width: 100% !important; padding: 0; margin: 0; box-shadow: none !important; }
+          .print-area { position: static !important; width: 100% !important; max-width: none !important; padding: 0; margin: 0; box-shadow: none !important; }
           .no-print { display: none !important; }
           .cgv-annexe { page-break-before: always; break-before: page; }
         }
@@ -2114,15 +2114,15 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
                 </div>
               </div>
               {cgv && (
-                <div className="cgv-annexe pt-6 mt-2 border-t-2 border-slate-800">
-                  <div className="text-sm font-bold text-slate-900 mb-1">CONDITIONS GÉNÉRALES DE VENTE</div>
-                  <div className="text-[10px] text-slate-500 mb-4">Version {settings.versionCGV} — {settings.entreprise} — annexées et applicables au présent devis</div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed mb-3">{cgv.intro}</p>
-                  <div className="space-y-2.5">
+                <div className="cgv-annexe pt-4 mt-2 border-t-2 border-slate-800">
+                  <div className="text-xs font-bold text-slate-900 mb-0.5">CONDITIONS GÉNÉRALES DE VENTE</div>
+                  <div className="text-[7px] text-slate-500 mb-2">Version {settings.versionCGV} — {settings.entreprise} — annexées et applicables au présent devis</div>
+                  <p className="text-[7px] text-slate-600 leading-snug mb-2">{cgv.intro}</p>
+                  <div className="gap-x-4" style={{ columnCount: 2 }}>
                     {cgv.articles.map((a, i) => (
-                      <div key={i}>
-                        <div className="font-semibold text-slate-800 text-[11px] mb-0.5">{a.titre}</div>
-                        <p className="text-[11px] text-slate-600 leading-relaxed">{a.texte}</p>
+                      <div key={i} style={{ breakInside: "avoid" }} className="mb-1.5">
+                        <div className="font-semibold text-slate-800 text-[7px] leading-snug">{a.titre}</div>
+                        <p className="text-[7px] text-slate-600 leading-snug">{a.texte}</p>
                       </div>
                     ))}
                   </div>
@@ -3900,9 +3900,8 @@ function CGVPrintView({ cgv, settings, onClose }) {
           html, body { height: auto !important; }
           body * { visibility: hidden; }
           .print-area, .print-area * { visibility: visible; }
-          main { display: none !important; }
           .no-print-parent { position: static !important; overflow: visible !important; height: auto !important; background: none !important; display: block !important; padding: 0 !important; }
-          .print-area { position: static !important; width: 100% !important; padding: 0; margin: 0; box-shadow: none !important; }
+          .print-area { position: static !important; width: 100% !important; max-width: none !important; padding: 0; margin: 0; box-shadow: none !important; }
           .no-print { display: none !important; }
         }
       `}</style>
@@ -3923,13 +3922,13 @@ function CGVPrintView({ cgv, settings, onClose }) {
             )}
           </div>
           <div className="text-lg font-bold text-slate-900 mt-4">CONDITIONS GÉNÉRALES DE VENTE</div>
-          <div className="text-xs text-slate-500 mb-6">Version {settings.versionCGV} — {settings.entreprise}</div>
-          <p className="text-xs text-slate-600 leading-relaxed mb-4">{cgv.intro}</p>
-          <div className="space-y-3">
+          <div className="text-xs text-slate-500 mb-4">Version {settings.versionCGV} — {settings.entreprise}</div>
+          <p className="text-[7px] text-slate-600 leading-snug mb-2">{cgv.intro}</p>
+          <div className="gap-x-4" style={{ columnCount: 2 }}>
             {cgv.articles.map((a, i) => (
-              <div key={i}>
-                <div className="font-semibold text-slate-800 text-xs mb-0.5">{a.titre}</div>
-                <p className="text-xs text-slate-600 leading-relaxed">{a.texte}</p>
+              <div key={i} style={{ breakInside: "avoid" }} className="mb-1.5">
+                <div className="font-semibold text-slate-800 text-[7px] leading-snug">{a.titre}</div>
+                <p className="text-[7px] text-slate-600 leading-snug">{a.texte}</p>
               </div>
             ))}
           </div>
