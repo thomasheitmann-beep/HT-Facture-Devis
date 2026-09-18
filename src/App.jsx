@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FileText, Receipt, Users, Package, Settings as SettingsIcon,
   Plus, Trash2, Pencil, Copy, ArrowRightLeft, Printer, X, Check, AlertTriangle,
-  ChevronLeft, Search, Zap, CircleDollarSign, Clock, TrendingUp, Upload, Truck, ShoppingCart, FolderOpen, ScrollText, Download, DatabaseBackup
+  ChevronLeft, Search, Zap, CircleDollarSign, Clock, TrendingUp, Upload, Truck, ShoppingCart, FolderOpen, ScrollText, Download, DatabaseBackup, Mail
 } from "lucide-react";
 
 /* ---------------------------------------------------------------------- */
@@ -1975,6 +1975,26 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
   const partyLabel = isCommande ? "Fournisseur" : "Client";
   const titleLabel = isDevis ? "DEVIS" : isCommande ? "BON DE COMMANDE" : (doc.type && doc.type !== "Complète" ? `FACTURE — ${doc.type.toUpperCase()}` : "FACTURE");
 
+  const partyEmail = client?.email || "";
+  const partyContact = client?.contact || client?.societe || client?.raisonSociale || "";
+  const docKind = isDevis ? "devis" : isCommande ? "bon de commande" : "facture";
+  const buildMailto = () => {
+    const subject = encodeURIComponent(`${docKind === "devis" ? "Devis" : docKind === "bon de commande" ? "Commande" : "Facture"} ${doc.numero} — ${settings.entreprise}`);
+    const body = encodeURIComponent(
+      [
+        `Bonjour${partyContact ? ` ${partyContact}` : ""},`,
+        "",
+        `Veuillez trouver ci-joint notre ${docKind} n° ${doc.numero}.`,
+        "",
+        "N'hésitez pas à nous contacter pour toute question.",
+        "",
+        "Cordialement,",
+        settings.entreprise,
+      ].join("\n")
+    );
+    return `mailto:${partyEmail}?subject=${subject}&body=${body}`;
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-start justify-center overflow-y-auto py-2 sm:py-8 px-0 sm:px-4 no-print-parent">
       <style>{`
@@ -1995,7 +2015,15 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
           <span className="text-sm font-medium text-slate-500">
             Aperçu {docLabel}
           </span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Btn
+              variant="outline"
+              onClick={() => { window.location.href = buildMailto(); }}
+              disabled={!partyEmail}
+              title={partyEmail ? `Ouvrir un e-mail à ${partyEmail}` : "Aucune adresse e-mail enregistrée pour ce contact"}
+            >
+              <Mail size={15} /> E-mail
+            </Btn>
             <Btn variant="outline" onClick={() => window.print()}>
               <Printer size={15} /> Imprimer / PDF
             </Btn>
@@ -2043,7 +2071,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6 text-xs">
             <div className="bg-slate-50 rounded-lg p-3">
-              <div className="text-slate-400 uppercase tracking-wide font-semibold mb-1">{partyLabel}</div>
+              <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">{partyLabel}</div>
               <div className="font-medium text-slate-800">{isCommande ? (client?.raisonSociale || "—") : (client?.societe || "—")}</div>
               <div className="text-slate-500">{client?.contact}</div>
               <div className="text-slate-500">{client?.adresse}</div>
@@ -2051,7 +2079,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
               <div className="text-slate-500">{client?.email}</div>
             </div>
             <div className="bg-slate-50 rounded-lg p-3">
-              <div className="text-slate-400 uppercase tracking-wide font-semibold mb-1">Objet</div>
+              <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">Objet</div>
               <div className="text-slate-700">{doc.objet || "—"}</div>
               {!isDevis && !isCommande && doc.refDevisNumero && (
                 <div className="text-slate-500 mt-1">Réf. devis : {doc.refDevisNumero}</div>
