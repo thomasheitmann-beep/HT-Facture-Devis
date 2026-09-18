@@ -1967,6 +1967,30 @@ function splitIntoColumns(articles, n) {
   return cols;
 }
 
+// Construit un lien mailto: pré-rempli (destinataire, objet, corps) pour
+// un devis, une facture ou une commande — réutilisable partout dans l'app
+// (liste, formulaire d'édition, aperçu imprimable).
+function buildMailtoLink(doc, party, settings, docKind) {
+  const email = party?.email || "";
+  const contact = party?.contact || party?.societe || party?.raisonSociale || "";
+  const kindLabel = docKind === "devis" ? "Devis" : docKind === "commande" ? "Commande" : "Facture";
+  const kindWord = docKind === "devis" ? "devis" : docKind === "commande" ? "bon de commande" : "facture";
+  const subject = encodeURIComponent(`${kindLabel} ${doc.numero} — ${settings.entreprise}`);
+  const body = encodeURIComponent(
+    [
+      `Bonjour${contact ? ` ${contact}` : ""},`,
+      "",
+      `Veuillez trouver ci-joint notre ${kindWord} n° ${doc.numero}.`,
+      "",
+      "N'hésitez pas à nous contacter pour toute question.",
+      "",
+      "Cordialement,",
+      settings.entreprise,
+    ].join("\n")
+  );
+  return `mailto:${email}?subject=${subject}&body=${body}`;
+}
+
 function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
   const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
   const isDevis = type === "devis";
@@ -1976,24 +2000,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
   const titleLabel = isDevis ? "DEVIS" : isCommande ? "BON DE COMMANDE" : (doc.type && doc.type !== "Complète" ? `FACTURE — ${doc.type.toUpperCase()}` : "FACTURE");
 
   const partyEmail = client?.email || "";
-  const partyContact = client?.contact || client?.societe || client?.raisonSociale || "";
-  const docKind = isDevis ? "devis" : isCommande ? "bon de commande" : "facture";
-  const buildMailto = () => {
-    const subject = encodeURIComponent(`${docKind === "devis" ? "Devis" : docKind === "bon de commande" ? "Commande" : "Facture"} ${doc.numero} — ${settings.entreprise}`);
-    const body = encodeURIComponent(
-      [
-        `Bonjour${partyContact ? ` ${partyContact}` : ""},`,
-        "",
-        `Veuillez trouver ci-joint notre ${docKind} n° ${doc.numero}.`,
-        "",
-        "N'hésitez pas à nous contacter pour toute question.",
-        "",
-        "Cordialement,",
-        settings.entreprise,
-      ].join("\n")
-    );
-    return `mailto:${partyEmail}?subject=${subject}&body=${body}`;
-  };
+  const docKind = isDevis ? "devis" : isCommande ? "commande" : "facture";
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-start justify-center overflow-y-auto py-2 sm:py-8 px-0 sm:px-4 no-print-parent">
@@ -2018,7 +2025,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
           <div className="flex flex-wrap gap-2">
             <Btn
               variant="outline"
-              onClick={() => { window.location.href = buildMailto(); }}
+              onClick={() => { window.location.href = buildMailtoLink(doc, client, settings, docKind); }}
               disabled={!partyEmail}
               title={partyEmail ? `Ouvrir un e-mail à ${partyEmail}` : "Aucune adresse e-mail enregistrée pour ce contact"}
             >
@@ -2318,12 +2325,22 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         </h3>
         <div className="flex items-center gap-2">
           {initial && (
-            <button
-              onClick={() => onConvert(initial)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-            >
-              <ArrowRightLeft size={15} /> Convertir en facture
-            </button>
+            <>
+              <button
+                onClick={() => { window.location.href = buildMailtoLink(doc, clients.find((c) => c.id === doc.clientId), settings, "devis"); }}
+                disabled={!clients.find((c) => c.id === doc.clientId)?.email}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Envoyer ce devis par e-mail"
+              >
+                <Mail size={15} /> E-mail
+              </button>
+              <button
+                onClick={() => onConvert(initial)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+              >
+                <ArrowRightLeft size={15} /> Convertir en facture
+              </button>
+            </>
           )}
           <Btn variant="ghost" onClick={onCancel}><ChevronLeft size={15} /> Retour à la liste</Btn>
         </div>
@@ -2618,6 +2635,12 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
                       >
                         <ArrowRightLeft size={13} /> Facturer
                       </button>
+                      <button
+                        title={clients.find((c) => c.id === d.clientId)?.email ? "Envoyer ce devis par e-mail" : "Aucun e-mail enregistré pour ce client"}
+                        disabled={!clients.find((c) => c.id === d.clientId)?.email}
+                        onClick={() => { window.location.href = buildMailtoLink(d, clients.find((c) => c.id === d.clientId), settings, "devis"); }}
+                        className="p-2 text-slate-400 hover:text-sky-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                      ><Mail size={16} /></button>
                       <button title="Aperçu / Imprimer" onClick={() => openPreview("devis", d)} className="p-2 text-slate-400 hover:text-amber-600"><Printer size={16} /></button>
                       <button title="Modifier" onClick={() => setEditing(d)} className="p-2 text-slate-400 hover:text-slate-700"><Pencil size={16} /></button>
                       <button title="Dupliquer" onClick={() => duplicate(d)} className="p-2 text-slate-400 hover:text-slate-700"><Copy size={16} /></button>
@@ -2768,6 +2791,12 @@ function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, cat
                       {st !== "Payée" && (
                         <button title="Marquer comme payée" onClick={() => markPaid(f)} className="p-1.5 text-slate-400 hover:text-emerald-600"><CircleDollarSign size={15} /></button>
                       )}
+                      <button
+                        title={clients.find((c) => c.id === f.clientId)?.email ? "Envoyer cette facture par e-mail" : "Aucun e-mail enregistré pour ce client"}
+                        disabled={!clients.find((c) => c.id === f.clientId)?.email}
+                        onClick={() => { window.location.href = buildMailtoLink(f, clients.find((c) => c.id === f.clientId), settings, "facture"); }}
+                        className="p-1.5 text-slate-400 hover:text-sky-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                      ><Mail size={15} /></button>
                       <button title="Aperçu / Imprimer" onClick={() => openPreview("facture", f)} className="p-1.5 text-slate-400 hover:text-amber-600"><Printer size={15} /></button>
                       <button title="Modifier" onClick={() => setEditing(f)} className="p-1.5 text-slate-400 hover:text-slate-700"><Pencil size={15} /></button>
                       <button title="Supprimer" onClick={() => remove(f.id)} className="p-1.5 text-slate-400 hover:text-red-600"><Trash2 size={15} /></button>
@@ -2990,6 +3019,12 @@ function CommandesTab({ commandesList, saveCommandesList, fournisseurs, saveFour
                   <td className="px-4 py-2.5 text-right font-medium text-slate-800">{money(t.ttc)}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex justify-end gap-1">
+                      <button
+                        title={fournisseurs.find((f) => f.id === d.fournisseurId)?.email ? "Envoyer cette commande par e-mail" : "Aucun e-mail enregistré pour ce fournisseur"}
+                        disabled={!fournisseurs.find((f) => f.id === d.fournisseurId)?.email}
+                        onClick={() => { window.location.href = buildMailtoLink(d, fournisseurs.find((f) => f.id === d.fournisseurId), settings, "commande"); }}
+                        className="p-1.5 text-slate-400 hover:text-sky-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                      ><Mail size={15} /></button>
                       <button title="Aperçu / Imprimer" onClick={() => openPreview("commande", d)} className="p-1.5 text-slate-400 hover:text-amber-600"><Printer size={15} /></button>
                       <button title="Modifier" onClick={() => setEditing(d)} className="p-1.5 text-slate-400 hover:text-slate-700"><Pencil size={15} /></button>
                       <button title="Dupliquer" onClick={() => duplicate(d)} className="p-1.5 text-slate-400 hover:text-slate-700"><Copy size={15} /></button>
