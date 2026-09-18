@@ -100,7 +100,7 @@ export default function LoginGate({ children }) {
     <>
       <button
         onClick={() => signOut(auth)}
-        className="no-print fixed bottom-20 md:bottom-3 left-3 z-40 text-xs text-slate-300 hover:text-white bg-slate-900 border border-slate-700 rounded-full px-3 py-1.5 shadow-sm"
+        className="no-print fixed bottom-20 md:bottom-12 left-3 z-40 text-xs text-slate-300 hover:text-white bg-slate-900 border border-slate-700 rounded-full px-3 py-1.5 shadow-sm"
         title={user.email}
       >
         Se déconnecter
