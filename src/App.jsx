@@ -2297,7 +2297,7 @@ function PartyDetailsCard({ party, fields, onSave }) {
   );
 }
 
-function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onCancel, onConvert, saveClients }) {
+function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onCancel, onConvert, saveClients, openPreview }) {
   const [doc, setDoc] = useState(
     initial || {
       id: uid(),
@@ -2326,6 +2326,13 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         <div className="flex items-center gap-2">
           {initial && (
             <>
+              <button
+                onClick={() => openPreview("devis", initial)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+                title="Aperçu / Imprimer ce devis"
+              >
+                <Printer size={15} /> Imprimer
+              </button>
               <button
                 onClick={() => { window.location.href = buildMailtoLink(doc, clients.find((c) => c.id === doc.clientId), settings, "devis"); }}
                 disabled={!clients.find((c) => c.id === doc.clientId)?.email}
@@ -2412,7 +2419,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
 /* Facture form                                                           */
 /* ---------------------------------------------------------------------- */
 
-function FactureForm({ initial, clients, catalog, facturesList, settings, onSave, onCancel, saveClients }) {
+function FactureForm({ initial, clients, catalog, facturesList, settings, onSave, onCancel, saveClients, openPreview }) {
   const [doc, setDoc] = useState(
     initial || {
       id: uid(),
@@ -2434,12 +2441,33 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h3 className="font-semibold text-slate-800 flex items-center gap-2">
           <Receipt size={18} className="text-amber-500" />
           {initial ? `Modifier ${doc.numero}` : "Nouvelle facture"}
         </h3>
-        <Btn variant="ghost" onClick={onCancel}><ChevronLeft size={15} /> Retour à la liste</Btn>
+        <div className="flex items-center gap-2">
+          {initial && (
+            <>
+              <button
+                onClick={() => openPreview("facture", initial)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+                title="Aperçu / Imprimer cette facture"
+              >
+                <Printer size={15} /> Imprimer
+              </button>
+              <button
+                onClick={() => { window.location.href = buildMailtoLink(doc, clients.find((c) => c.id === doc.clientId), settings, "facture"); }}
+                disabled={!clients.find((c) => c.id === doc.clientId)?.email}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Envoyer cette facture par e-mail"
+              >
+                <Mail size={15} /> E-mail
+              </button>
+            </>
+          )}
+          <Btn variant="ghost" onClick={onCancel}><ChevronLeft size={15} /> Retour à la liste</Btn>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -2586,6 +2614,7 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
         onSave={handleSave}
         onCancel={() => setEditing(null)}
         onConvert={(d) => { setEditing(null); setConverting(d); }}
+        openPreview={openPreview}
       />
     );
   }
@@ -2743,6 +2772,7 @@ function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, cat
         settings={settings}
         onSave={handleSave}
         onCancel={() => setEditing(null)}
+        openPreview={openPreview}
       />
     );
   }
@@ -2820,7 +2850,7 @@ function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, cat
 /* Commande d'achat fournisseur (bon de commande)                         */
 /* ---------------------------------------------------------------------- */
 
-function CommandeForm({ initial, fournisseurs, clients, commandesList, settings, onSave, onCancel, saveFournisseurs }) {
+function CommandeForm({ initial, fournisseurs, clients, commandesList, settings, onSave, onCancel, saveFournisseurs, openPreview }) {
   const [doc, setDoc] = useState(
     initial || {
       id: uid(),
@@ -2849,12 +2879,33 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h3 className="font-semibold text-slate-800 flex items-center gap-2">
           <ShoppingCart size={18} className="text-amber-500" />
           {initial ? `Modifier ${doc.numero}` : "Nouvelle commande d'achat"}
         </h3>
-        <Btn variant="ghost" onClick={onCancel}><ChevronLeft size={15} /> Retour à la liste</Btn>
+        <div className="flex items-center gap-2">
+          {initial && (
+            <>
+              <button
+                onClick={() => openPreview("commande", initial)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+                title="Aperçu / Imprimer cette commande"
+              >
+                <Printer size={15} /> Imprimer
+              </button>
+              <button
+                onClick={() => { window.location.href = buildMailtoLink(doc, fournisseurs.find((f) => f.id === doc.fournisseurId), settings, "commande"); }}
+                disabled={!fournisseurs.find((f) => f.id === doc.fournisseurId)?.email}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Envoyer cette commande par e-mail"
+              >
+                <Mail size={15} /> E-mail
+              </button>
+            </>
+          )}
+          <Btn variant="ghost" onClick={onCancel}><ChevronLeft size={15} /> Retour à la liste</Btn>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -2978,6 +3029,7 @@ function CommandesTab({ commandesList, saveCommandesList, fournisseurs, saveFour
         settings={settings}
         onSave={handleSave}
         onCancel={() => setEditing(null)}
+        openPreview={openPreview}
       />
     );
   }
