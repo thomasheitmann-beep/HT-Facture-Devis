@@ -1728,6 +1728,29 @@ const DEVIS_CONDITIONS_DEFAUT =
 const DEVIS_DOCUMENTS_A_FOURNIR_DEFAUT =
   "Schémas électriques des équipements concernés (cellules, relais, commandes)\nNotices constructeurs des équipements à intervenir\nListe des points de contrôle attendus avant remise en service\nUn interlocuteur technique disponible sur site pendant l'intervention\nAccès libre et sécurisé aux installations concernées aux dates convenues";
 
+const HORAIRE_PRESETS = [
+  "heures de jour (8h-17h, du lundi au vendredi)",
+  "heures de nuit",
+  "astreinte / week-end et jours fériés",
+  "personnalisé",
+];
+
+// Construit le texte du préambule à partir des champs structurés du devis
+// (horaire, durée, personnel requis, date de début, précisions libres).
+function buildPreambuleText(doc) {
+  if (!doc.preambuleInclure) return "";
+  const parts = [];
+  const horaire = doc.preambuleHoraire === "personnalisé" ? doc.preambuleHoraireCustom : doc.preambuleHoraire;
+  if (horaire) parts.push(`Cette prestation est chiffrée en ${horaire}.`);
+  const duree = Number(doc.preambuleDureeJours);
+  if (duree > 0) parts.push(`La réalisation se déroulera sur ${duree} jour${duree > 1 ? "s" : ""}.`);
+  const personnel = Number(doc.preambulePersonnel);
+  if (personnel > 0) parts.push(`Il faudra prévoir ${personnel} personne${personnel > 1 ? "s" : ""} de votre société.`);
+  if (doc.preambuleDateDebut) parts.push(`Elle sera réalisée à partir du ${fmtDate(doc.preambuleDateDebut)}.`);
+  if (doc.preambuleNote) parts.push(doc.preambuleNote);
+  return parts.join(" ");
+}
+
 const DEVIS_STATUTS = ["Brouillon", "Envoyé", "Accepté", "Refusé"];
 const FACTURE_STATUTS = ["À émettre", "Émise", "Payée"];
 const COMMANDE_STATUTS = ["Brouillon", "Envoyée", "Confirmée", "Reçue", "Annulée"];
@@ -2108,10 +2131,10 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
             </div>
           </div>
 
-          {isDevis && doc.preambule && (
+          {isDevis && buildPreambuleText(doc) && (
             <div className="text-xs mb-4">
               <div className="font-semibold text-slate-700 mb-1">Préambule</div>
-              <p className="text-slate-600 leading-relaxed whitespace-pre-line">{doc.preambule}</p>
+              <p className="text-slate-600 leading-relaxed whitespace-pre-line">{buildPreambuleText(doc)}</p>
             </div>
           )}
 
@@ -2339,7 +2362,13 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       clientId: clients[0]?.id || "",
       objet: "Intervention de maintenance",
       refClient: "",
-      preambule: "",
+      preambuleInclure: false,
+      preambuleHoraire: HORAIRE_PRESETS[0],
+      preambuleHoraireCustom: "",
+      preambuleDureeJours: "",
+      preambulePersonnel: "",
+      preambuleDateDebut: "",
+      preambuleNote: "",
       descriptifTravaux: "",
       lignes: [],
       remiseGlobale: 0,
@@ -2421,10 +2450,48 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         </Field>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <Field label="Préambule (conditions de réalisation, horaires, durée, personnel requis...)">
-          <TextArea rows={3} value={doc.preambule} onChange={(e) => setDoc({ ...doc, preambule: e.target.value })} placeholder="ex. Prestation chiffrée en heures de jour (8h-17h). Intervention sur 2 jours, à partir du..." />
-        </Field>
+      <div className="border border-slate-200 rounded-xl p-4 mb-4">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={doc.preambuleInclure}
+            onChange={(e) => setDoc({ ...doc, preambuleInclure: e.target.checked })}
+            className="rounded border-slate-300"
+          />
+          Inclure un préambule sur les conditions de réalisation
+        </label>
+        {doc.preambuleInclure && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <Field label="Type d'horaire" className="md:col-span-2">
+              <Select value={doc.preambuleHoraire} onChange={(e) => setDoc({ ...doc, preambuleHoraire: e.target.value })}>
+                {HORAIRE_PRESETS.map((h) => <option key={h} value={h}>{h.charAt(0).toUpperCase() + h.slice(1)}</option>)}
+              </Select>
+            </Field>
+            {doc.preambuleHoraire === "personnalisé" && (
+              <Field label="Préciser l'horaire" className="md:col-span-2">
+                <TextInput value={doc.preambuleHoraireCustom} onChange={(e) => setDoc({ ...doc, preambuleHoraireCustom: e.target.value })} placeholder="ex. heures de jour et de nuit, selon planning fourni" />
+              </Field>
+            )}
+            <Field label="Durée prévue (jours)">
+              <TextInput type="number" min="0" value={doc.preambuleDureeJours} onChange={(e) => setDoc({ ...doc, preambuleDureeJours: e.target.value })} />
+            </Field>
+            <Field label="Personnel requis côté client">
+              <TextInput type="number" min="0" value={doc.preambulePersonnel} onChange={(e) => setDoc({ ...doc, preambulePersonnel: e.target.value })} />
+            </Field>
+            <Field label="Date de début souhaitée">
+              <TextInput type="date" value={doc.preambuleDateDebut} onChange={(e) => setDoc({ ...doc, preambuleDateDebut: e.target.value })} />
+            </Field>
+            <Field label="Précisions complémentaires (optionnel)" className="md:col-span-4">
+              <TextArea rows={2} value={doc.preambuleNote} onChange={(e) => setDoc({ ...doc, preambuleNote: e.target.value })} />
+            </Field>
+            <div className="md:col-span-4 text-xs text-slate-500 bg-slate-50 rounded-lg p-2.5 italic">
+              Aperçu : {buildPreambuleText(doc) || "—"}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 mb-4">
         <Field label="Descriptif des travaux (une ligne = un point, affiché en liste)">
           <TextArea rows={3} value={doc.descriptifTravaux} onChange={(e) => setDoc({ ...doc, descriptifTravaux: e.target.value })} placeholder={"ex. Maintenance préventive des disjoncteurs BT\nNettoyage du chantier\nÉtablissement d'un PV d'intervention"} />
         </Field>
