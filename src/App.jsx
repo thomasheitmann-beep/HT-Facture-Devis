@@ -1725,6 +1725,9 @@ const SEED_CLIENTS_IMPORT = [
 const DEVIS_CONDITIONS_DEFAUT =
   "Paiement selon les conditions indiquées ci-contre. Toute prestation supplémentaire fera l'objet d'un accord écrit. Le client garantit l'accès, la consignation et les conditions de sécurité du site. Les délais sont indicatifs sauf engagement écrit contraire.";
 
+const DEVIS_DOCUMENTS_A_FOURNIR_DEFAUT =
+  "Schémas électriques des équipements concernés (cellules, relais, commandes)\nNotices constructeurs des équipements à intervenir\nListe des points de contrôle attendus avant remise en service\nUn interlocuteur technique disponible sur site pendant l'intervention\nAccès libre et sécurisé aux installations concernées aux dates convenues";
+
 const DEVIS_STATUTS = ["Brouillon", "Envoyé", "Accepté", "Refusé"];
 const FACTURE_STATUTS = ["À émettre", "Émise", "Payée"];
 const COMMANDE_STATUTS = ["Brouillon", "Envoyée", "Confirmée", "Reçue", "Annulée"];
@@ -2105,6 +2108,24 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
             </div>
           </div>
 
+          {isDevis && doc.preambule && (
+            <div className="text-xs mb-4">
+              <div className="font-semibold text-slate-700 mb-1">Préambule</div>
+              <p className="text-slate-600 leading-relaxed whitespace-pre-line">{doc.preambule}</p>
+            </div>
+          )}
+
+          {isDevis && doc.descriptifTravaux && (
+            <div className="text-xs mb-4">
+              <div className="font-semibold text-slate-700 mb-1">Les travaux comprendront</div>
+              <ul className="list-disc pl-4 text-slate-600 leading-relaxed space-y-0.5">
+                {doc.descriptifTravaux.split("\n").filter((l) => l.trim()).map((l, i) => (
+                  <li key={i}>{l.trim()}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <table className="w-full text-xs mb-4">
             <thead>
               <tr className="border-b-2 border-slate-800 text-slate-500 uppercase text-[10px] tracking-wide">
@@ -2155,6 +2176,16 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
 
           {isDevis ? (
             <>
+              {doc.documentsAFournir && (
+                <div className="text-xs bg-slate-50 rounded-lg p-3 mb-4">
+                  <div className="font-semibold text-slate-700 mb-1">Documents à fournir par le client</div>
+                  <ul className="list-disc pl-4 text-slate-500 leading-relaxed space-y-0.5">
+                    {doc.documentsAFournir.split("\n").filter((l) => l.trim()).map((l, i) => (
+                      <li key={i}>{l.trim()}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="text-xs text-slate-500 leading-relaxed border-t border-slate-200 pt-3 mb-4">
                 {doc.conditions}
               </div>
@@ -2308,8 +2339,11 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       clientId: clients[0]?.id || "",
       objet: "Intervention de maintenance",
       refClient: "",
+      preambule: "",
+      descriptifTravaux: "",
       lignes: [],
       remiseGlobale: 0,
+      documentsAFournir: DEVIS_DOCUMENTS_A_FOURNIR_DEFAUT,
       conditions: DEVIS_CONDITIONS_DEFAUT,
     }
   );
@@ -2387,7 +2421,20 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         </Field>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <Field label="Préambule (conditions de réalisation, horaires, durée, personnel requis...)">
+          <TextArea rows={3} value={doc.preambule} onChange={(e) => setDoc({ ...doc, preambule: e.target.value })} placeholder="ex. Prestation chiffrée en heures de jour (8h-17h). Intervention sur 2 jours, à partir du..." />
+        </Field>
+        <Field label="Descriptif des travaux (une ligne = un point, affiché en liste)">
+          <TextArea rows={3} value={doc.descriptifTravaux} onChange={(e) => setDoc({ ...doc, descriptifTravaux: e.target.value })} placeholder={"ex. Maintenance préventive des disjoncteurs BT\nNettoyage du chantier\nÉtablissement d'un PV d'intervention"} />
+        </Field>
+      </div>
+
       <LinesEditor lignes={doc.lignes} setLignes={(l) => setDoc({ ...doc, lignes: l })} catalog={catalog} />
+
+      <Field label="Documents à fournir par le client (une ligne = un point, affiché en liste)" className="mt-4">
+        <TextArea rows={4} value={doc.documentsAFournir} onChange={(e) => setDoc({ ...doc, documentsAFournir: e.target.value })} />
+      </Field>
 
       <div className="flex flex-col md:flex-row gap-4 mt-4">
         <Field label="Conditions particulières / observations" className="flex-1">
