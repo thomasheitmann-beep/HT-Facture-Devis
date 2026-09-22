@@ -1725,8 +1725,21 @@ const SEED_CLIENTS_IMPORT = [
 const DEVIS_CONDITIONS_DEFAUT =
   "Paiement selon les conditions indiquées ci-contre. Toute prestation supplémentaire fera l'objet d'un accord écrit. Le client garantit l'accès, la consignation et les conditions de sécurité du site. Les délais sont indicatifs sauf engagement écrit contraire.";
 
-const DEVIS_DOCUMENTS_A_FOURNIR_DEFAUT =
-  "Schémas électriques des équipements concernés (cellules, relais, commandes)\nNotices constructeurs des équipements à intervenir\nListe des points de contrôle attendus avant remise en service\nUn interlocuteur technique disponible sur site pendant l'intervention\nAccès libre et sécurisé aux installations concernées aux dates convenues";
+const DOCUMENTS_PRESETS = [
+  "Schémas électriques des équipements concernés (cellules, relais, commandes)",
+  "Notices constructeurs des équipements à intervenir",
+  "Liste des points de contrôle attendus avant remise en service",
+  "Un interlocuteur technique disponible sur site pendant l'intervention",
+  "Accès libre et sécurisé aux installations concernées aux dates convenues",
+];
+
+// Combine les documents ajoutés manuellement (en premier, ce sont les
+// besoins spécifiques à ce devis) et les documents standards cochés.
+function buildDocumentsLines(doc) {
+  const custom = (doc.documentsManuel || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const checked = (doc.documentsChecklist || []).filter((l) => DOCUMENTS_PRESETS.includes(l));
+  return [...custom, ...checked];
+}
 
 const HORAIRE_PRESETS = [
   "heures de jour (8h-17h, du lundi au vendredi)",
@@ -1745,10 +1758,26 @@ function buildPreambuleText(doc) {
   const duree = Number(doc.preambuleDureeJours);
   if (duree > 0) parts.push(`La réalisation se déroulera sur ${duree} jour${duree > 1 ? "s" : ""}.`);
   const personnel = Number(doc.preambulePersonnel);
-  if (personnel > 0) parts.push(`Il faudra prévoir ${personnel} personne${personnel > 1 ? "s" : ""} de votre société.`);
+  if (personnel > 0) parts.push(`Cette prestation nécessitera ${personnel} intervenant${personnel > 1 ? "s" : ""} pour sa réalisation.`);
   if (doc.preambuleDateDebut) parts.push(`Elle sera réalisée à partir du ${fmtDate(doc.preambuleDateDebut)}.`);
   if (doc.preambuleNote) parts.push(doc.preambuleNote);
   return parts.join(" ");
+}
+
+const DESCRIPTIF_PRESETS = [
+  "Nettoyage du chantier",
+  "Établissement d'un procès-verbal d'intervention (PVI) en fin d'intervention",
+  "Contrôle et vérification du bon fonctionnement après intervention",
+  "Remise en service des équipements en fin d'intervention",
+  "Rédaction d'un rapport technique détaillé",
+];
+
+// Combine les points spécifiques saisis librement (en premier, ce sont le
+// cœur du devis) et les points standards cochés (nettoyage, PVI...).
+function buildDescriptifLines(doc) {
+  const custom = (doc.descriptifTravaux || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const checked = (doc.descriptifChecklist || []).filter((l) => DESCRIPTIF_PRESETS.includes(l));
+  return [...custom, ...checked];
 }
 
 const DEVIS_STATUTS = ["Brouillon", "Envoyé", "Accepté", "Refusé"];
@@ -2138,12 +2167,12 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
             </div>
           )}
 
-          {isDevis && doc.descriptifTravaux && (
+          {isDevis && buildDescriptifLines(doc).length > 0 && (
             <div className="text-xs mb-4">
               <div className="font-semibold text-slate-700 mb-1">Les travaux comprendront</div>
               <ul className="list-disc pl-4 text-slate-600 leading-relaxed space-y-0.5">
-                {doc.descriptifTravaux.split("\n").filter((l) => l.trim()).map((l, i) => (
-                  <li key={i}>{l.trim()}</li>
+                {buildDescriptifLines(doc).map((l, i) => (
+                  <li key={i}>{l}</li>
                 ))}
               </ul>
             </div>
@@ -2199,12 +2228,12 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, onClose }) {
 
           {isDevis ? (
             <>
-              {doc.documentsAFournir && (
+              {buildDocumentsLines(doc).length > 0 && (
                 <div className="text-xs bg-slate-50 rounded-lg p-3 mb-4">
                   <div className="font-semibold text-slate-700 mb-1">Documents à fournir par le client</div>
                   <ul className="list-disc pl-4 text-slate-500 leading-relaxed space-y-0.5">
-                    {doc.documentsAFournir.split("\n").filter((l) => l.trim()).map((l, i) => (
-                      <li key={i}>{l.trim()}</li>
+                    {buildDocumentsLines(doc).map((l, i) => (
+                      <li key={i}>{l}</li>
                     ))}
                   </ul>
                 </div>
@@ -2370,9 +2399,11 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       preambuleDateDebut: "",
       preambuleNote: "",
       descriptifTravaux: "",
+      descriptifChecklist: [],
       lignes: [],
       remiseGlobale: 0,
-      documentsAFournir: DEVIS_DOCUMENTS_A_FOURNIR_DEFAUT,
+      documentsManuel: "",
+      documentsChecklist: [...DOCUMENTS_PRESETS],
       conditions: DEVIS_CONDITIONS_DEFAUT,
     }
   );
@@ -2475,7 +2506,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
             <Field label="Durée prévue (jours)">
               <TextInput type="number" min="0" value={doc.preambuleDureeJours} onChange={(e) => setDoc({ ...doc, preambuleDureeJours: e.target.value })} />
             </Field>
-            <Field label="Personnel requis côté client">
+            <Field label="Personnel requis pour la prestation">
               <TextInput type="number" min="0" value={doc.preambulePersonnel} onChange={(e) => setDoc({ ...doc, preambulePersonnel: e.target.value })} />
             </Field>
             <Field label="Date de début souhaitée">
@@ -2491,17 +2522,83 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         )}
       </div>
 
-      <div className="grid grid-cols-1 mb-4">
-        <Field label="Descriptif des travaux (une ligne = un point, affiché en liste)">
-          <TextArea rows={3} value={doc.descriptifTravaux} onChange={(e) => setDoc({ ...doc, descriptifTravaux: e.target.value })} placeholder={"ex. Maintenance préventive des disjoncteurs BT\nNettoyage du chantier\nÉtablissement d'un PV d'intervention"} />
+      <div className="border border-slate-200 rounded-xl p-4 mb-4">
+        <div className="text-sm font-medium text-slate-700 mb-3">Descriptif des travaux</div>
+
+        <Field label="Points spécifiques à cette intervention (une ligne = un point)">
+          <TextArea rows={3} value={doc.descriptifTravaux} onChange={(e) => setDoc({ ...doc, descriptifTravaux: e.target.value })} placeholder={"ex. Maintenance préventive des disjoncteurs BT\nAssistance technique sur la protection du départ HT"} />
         </Field>
+
+        <div className="text-xs text-slate-500 font-medium mt-3 mb-1.5">Points standards à inclure</div>
+        <div className="flex flex-col gap-1.5">
+          {DESCRIPTIF_PRESETS.map((p) => (
+            <label key={p} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={(doc.descriptifChecklist || []).includes(p)}
+                onChange={(e) => {
+                  const current = doc.descriptifChecklist || [];
+                  setDoc({
+                    ...doc,
+                    descriptifChecklist: e.target.checked ? [...current, p] : current.filter((x) => x !== p),
+                  });
+                }}
+                className="rounded border-slate-300"
+              />
+              {p}
+            </label>
+          ))}
+        </div>
+
+        {buildDescriptifLines(doc).length > 0 && (
+          <div className="text-xs text-slate-500 bg-slate-50 rounded-lg p-2.5 italic mt-3">
+            Aperçu :
+            <ul className="list-disc pl-4 not-italic mt-1">
+              {buildDescriptifLines(doc).map((l, i) => <li key={i}>{l}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
 
       <LinesEditor lignes={doc.lignes} setLignes={(l) => setDoc({ ...doc, lignes: l })} catalog={catalog} />
 
-      <Field label="Documents à fournir par le client (une ligne = un point, affiché en liste)" className="mt-4">
-        <TextArea rows={4} value={doc.documentsAFournir} onChange={(e) => setDoc({ ...doc, documentsAFournir: e.target.value })} />
-      </Field>
+      <div className="border border-slate-200 rounded-xl p-4 mt-4">
+        <div className="text-sm font-medium text-slate-700 mb-3">Documents à fournir par le client</div>
+
+        <div className="text-xs text-slate-500 font-medium mb-1.5">Documents standards à demander</div>
+        <div className="flex flex-col gap-1.5 mb-3">
+          {DOCUMENTS_PRESETS.map((p) => (
+            <label key={p} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={(doc.documentsChecklist || []).includes(p)}
+                onChange={(e) => {
+                  const current = doc.documentsChecklist || [];
+                  setDoc({
+                    ...doc,
+                    documentsChecklist: e.target.checked ? [...current, p] : current.filter((x) => x !== p),
+                  });
+                }}
+                className="rounded border-slate-300"
+              />
+              {p}
+            </label>
+          ))}
+        </div>
+
+        <Field label="Ajout manuel (une ligne = un point)">
+          <TextArea rows={2} value={doc.documentsManuel} onChange={(e) => setDoc({ ...doc, documentsManuel: e.target.value })} placeholder="ex. Autorisation d'accès signée du site" />
+        </Field>
+
+        {buildDocumentsLines(doc).length > 0 && (
+          <div className="text-xs text-slate-500 bg-slate-50 rounded-lg p-2.5 italic mt-3">
+            Aperçu :
+            <ul className="list-disc pl-4 not-italic mt-1">
+              {buildDocumentsLines(doc).map((l, i) => <li key={i}>{l}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-col md:flex-row gap-4 mt-4">
         <Field label="Conditions particulières / observations" className="flex-1">
