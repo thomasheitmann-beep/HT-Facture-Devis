@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import {
   LayoutDashboard, FileText, Receipt, Users, Package, Settings as SettingsIcon,
   Plus, Trash2, Pencil, Copy, ArrowRightLeft, Printer, X, Check, AlertTriangle,
@@ -4317,7 +4318,7 @@ function CGVPrintView({ cgv, settings, onClose }) {
 /* Settings tab                                                           */
 /* ---------------------------------------------------------------------- */
 
-function SettingsTab({ settings, saveSettings, onExportBackup, onImportBackup, onExportExcel, backupCounts }) {
+function SettingsTab({ settings, saveSettings, onExportBackup, onImportBackup, onExportExcel, onExportSuiviComplet, backupCounts }) {
   const [form, setForm] = useState(settings);
   const dirty = JSON.stringify(form) !== JSON.stringify(settings);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -4445,13 +4446,25 @@ function SettingsTab({ settings, saveSettings, onExportBackup, onImportBackup, o
 
       <h3 className="font-semibold text-slate-800 mb-4">Export comptable (Excel)</h3>
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
-        <p className="text-sm text-slate-600 mb-4">
-          Génère un fichier Excel avec un onglet Devis, un onglet Factures et un onglet Commandes — mêmes colonnes que
-          le classeur de suivi mensuel (Date, Numéro, Client/Fournisseur, Montant HT, TVA %, Montant TTC, Statut).
-          Copiez-collez ensuite les lignes dans les onglets correspondants du classeur de suivi pour mettre à jour le
-          tableau de bord.
+        <p className="text-sm text-slate-600 mb-1">
+          <strong>Classeur de suivi complet</strong> — génère en un clic un fichier Excel prêt à l'emploi : vos devis,
+          factures et commandes réels, plus un onglet Suivi mensuel qui se recalcule automatiquement (formules,
+          listes déroulantes de statut, mise en forme). Pas de copier-coller.
         </p>
-        <Btn variant="outline" onClick={onExportExcel}><FileSpreadsheet size={15} /> Exporter en Excel</Btn>
+        <p className="text-xs text-slate-400 mb-4">
+          Limite technique : les graphiques ne peuvent pas être créés depuis un navigateur — c'est une limitation
+          d'Excel/du web, pas de l'application. Une fois le fichier ouvert dans Excel, sélectionnez le tableau de
+          l'onglet Suivi mensuel puis Insertion → Graphique recommandé : les graphiques se mettront ensuite à jour
+          tout seuls à chaque nouvelle ligne ajoutée dans ce même fichier.
+        </p>
+        <Btn variant="primary" onClick={onExportSuiviComplet}><FileSpreadsheet size={15} /> Générer le classeur de suivi complet</Btn>
+
+        <div className="border-t border-slate-100 mt-5 pt-4">
+          <p className="text-xs text-slate-500 mb-3">
+            Besoin seulement des données brutes (par ex. pour les coller dans un classeur de suivi existant) ?
+          </p>
+          <Btn variant="outline" onClick={onExportExcel}><Download size={15} /> Exporter les données brutes</Btn>
+        </div>
       </div>
 
       <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
@@ -4874,6 +4887,223 @@ export default function App() {
     XLSX.writeFile(wbook, `export-devis-factures-commandes-${stamp}.xlsx`);
   };
 
+  // Génère le classeur de suivi COMPLET (Légende, Devis, Factures, Commandes
+  // remplis avec les données réelles, Suivi mensuel avec formules vivantes,
+  // listes déroulantes de statut) — prêt à l'emploi, sans copier-coller.
+  // Limite technique : les graphiques ne peuvent pas être créés depuis le
+  // navigateur (aucune bibliothèque JS ne sait écrire des graphiques Excel) ;
+  // l'onglet Suivi mensuel reste la source à sélectionner pour un Insertion
+  // > Graphique dans Excel, une fois, si vous voulez les mêmes visuels.
+  const exportSuiviComplet = async () => {
+    const clientName = (id) => clients.find((c) => c.id === id)?.societe || "";
+    const fournisseurName = (id) => fournisseurs.find((f) => f.id === id)?.raisonSociale || "";
+    const asDate = (iso) => (iso ? new Date(iso) : null);
+
+    const FONT_NAME = "Arial";
+    const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+    const HEADER_FONT = { name: FONT_NAME, color: { argb: "FFFFFFFF" }, bold: true, size: 10 };
+    const TITLE_FONT = { name: FONT_NAME, bold: true, size: 14, color: { argb: "FF1F2937" } };
+    const SUBTITLE_FONT = { name: FONT_NAME, italic: true, size: 9, color: { argb: "FF6B7280" } };
+    const INPUT_FONT = { name: FONT_NAME, color: { argb: "FF0000FF" }, size: 10 };
+    const FORMULA_FONT = { name: FONT_NAME, color: { argb: "FF000000" }, size: 10 };
+    const TOTAL_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE5E7EB" } };
+    const TOTAL_FONT = { name: FONT_NAME, bold: true, size: 10 };
+    const THIN = { style: "thin", color: { argb: "FFD1D5DB" } };
+    const BORDER = { top: THIN, left: THIN, bottom: THIN, right: THIN };
+    const CUR_FMT = '#,##0.00" €"';
+    const PCT_FMT = "0.0%";
+    const DATE_FMT = "dd/mm/yyyy";
+    const MONTH_FMT = "mmm yyyy";
+    const MAX_ROW = 1000;
+
+    const wbx = new ExcelJS.Workbook();
+    wbx.creator = settings.entreprise || "HT Maintenance";
+    wbx.created = new Date();
+
+    // --- Légende ---
+    const leg = wbx.addWorksheet("Légende", { views: [{ showGridLines: false }] });
+    leg.getColumn(1).width = 2;
+    leg.getColumn(2).width = 16;
+    leg.getColumn(3).width = 44;
+    leg.getColumn(4).width = 44;
+    leg.getCell("B2").value = "Suivi Devis / Factures / Commandes — HT Maintenance";
+    leg.getCell("B2").font = TITLE_FONT;
+    leg.getCell("B3").value = `Généré le ${fmtDate(today())} depuis l'application. Les onglets Devis, Factures et Commandes contiennent vos données réelles ; le Suivi mensuel se recalcule automatiquement.`;
+    leg.getCell("B3").font = SUBTITLE_FONT;
+    leg.getCell("B3").alignment = { wrapText: true };
+    leg.mergeCells("B3:D3");
+    leg.getRow(3).height = 30;
+
+    const legRows = [
+      ["Onglet", "Contenu", "Action attendue"],
+      ["Devis / Factures / Commandes", "Vos documents réels, exportés depuis l'application", "Ajouter vos futures lignes directement ici (colonne Statut = liste déroulante)"],
+      ["Suivi mensuel", "Tableau récapitulatif mois par mois, calculé automatiquement", "Modifier uniquement l'année de suivi (cellule bleue)"],
+    ];
+    legRows.forEach((r, i) => {
+      const row = leg.getRow(6 + i);
+      r.forEach((v, j) => {
+        const cell = row.getCell(2 + j);
+        cell.value = v;
+        cell.font = i === 0 ? HEADER_FONT : FORMULA_FONT;
+        cell.fill = i === 0 ? HEADER_FILL : undefined;
+        cell.alignment = { wrapText: true, vertical: "middle" };
+        cell.border = BORDER;
+      });
+      row.height = i === 0 ? 20 : 28;
+    });
+
+    // --- Feuilles de saisie ---
+    function buildInputSheet(name, headers, rows, statuts, widths) {
+      const ws = wbx.addWorksheet(name, { views: [{ state: "frozen", ySplit: 1, showGridLines: false }] });
+      widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      const headerRow = ws.getRow(1);
+      headers.forEach((h, i) => {
+        const cell = headerRow.getCell(i + 1);
+        cell.value = h;
+        cell.font = HEADER_FONT;
+        cell.fill = HEADER_FILL;
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        cell.border = BORDER;
+      });
+      headerRow.height = 22;
+
+      rows.forEach((r, i) => {
+        const row = ws.getRow(2 + i);
+        r.forEach((v, j) => {
+          const cell = row.getCell(j + 1);
+          cell.value = v;
+          cell.font = FORMULA_FONT;
+          cell.border = BORDER;
+          if (j === 0 || (headers[7] && j === 7)) cell.numFmt = DATE_FMT;
+          if (j === 3 || j === 5) cell.numFmt = CUR_FMT;
+          if (j === 4) cell.numFmt = PCT_FMT;
+        });
+      });
+
+      const statutColLetter = String.fromCharCode(65 + 6); // colonne G
+      for (let r = 2; r <= MAX_ROW; r++) {
+        ws.getCell(`${statutColLetter}${r}`).dataValidation = {
+          type: "list", allowBlank: true, formulae: [`"${statuts.join(",")}"`],
+        };
+      }
+      return ws;
+    }
+
+    const devisRows = devisList.map((d) => {
+      const t = computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA);
+      return [asDate(d.date), d.numero, clientName(d.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), d.statut];
+    });
+    const facturesRows = facturesList.map((f) => {
+      const t = computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA);
+      return [asDate(f.dateEmission), f.numero, clientName(f.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), f.statut, asDate(f.datePaiement)];
+    });
+    const commandesRows = commandesList.map((c) => {
+      const t = computeTotals(c.lignes, c.remiseGlobale, settings.tauxTVA);
+      return [asDate(c.date), c.numero, fournisseurName(c.fournisseurId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), c.statut];
+    });
+
+    buildInputSheet("Devis", ["Date", "N° devis", "Client", "Montant HT", "TVA %", "Montant TTC", "Statut"], devisRows, DEVIS_STATUTS, [12, 14, 26, 14, 9, 14, 14]);
+    buildInputSheet("Factures", ["Date émission", "N° facture", "Client", "Montant HT", "TVA %", "Montant TTC", "Statut", "Date paiement"], facturesRows, FACTURE_STATUTS, [13, 14, 26, 14, 9, 14, 13, 14]);
+    buildInputSheet("Commandes", ["Date", "N° commande", "Fournisseur", "Montant HT", "TVA %", "Montant TTC", "Statut"], commandesRows, COMMANDE_STATUTS, [12, 15, 26, 14, 9, 14, 14]);
+
+    // --- Suivi mensuel ---
+    const sm = wbx.addWorksheet("Suivi mensuel", { views: [{ state: "frozen", ySplit: 7, showGridLines: false }] });
+    const smWidths = [12, 13, 14, 15, 12, 15, 14, 14, 13, 13, 14, 15];
+    smWidths.forEach((w, i) => { sm.getColumn(i + 1).width = w; });
+
+    sm.getCell("A1").value = "Suivi mensuel";
+    sm.getCell("A1").font = TITLE_FONT;
+    sm.getCell("A2").value = "Calculé automatiquement à partir des onglets Devis / Factures / Commandes.";
+    sm.getCell("A2").font = SUBTITLE_FONT;
+
+    sm.getCell("A4").value = "Année de suivi";
+    sm.getCell("A4").font = { name: FONT_NAME, bold: true, size: 10 };
+    sm.getCell("B4").value = new Date().getFullYear();
+    sm.getCell("B4").font = INPUT_FONT;
+    sm.getCell("B4").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEF9C3" } };
+    sm.getCell("B4").border = BORDER;
+    sm.getCell("B4").alignment = { horizontal: "center" };
+
+    const headers = [
+      "Mois", "Nb devis émis", "CA devis HT", "Nb devis acceptés", "Taux transfo",
+      "Nb factures émises", "CA facturé HT", "CA encaissé HT",
+      "Nb commandes", "Achats HT", "Marge estimée", "Croissance CA facturé",
+    ];
+    const headerRow6 = sm.getRow(6);
+    headers.forEach((h, i) => {
+      const cell = headerRow6.getCell(i + 1);
+      cell.value = h;
+      cell.font = HEADER_FONT;
+      cell.fill = HEADER_FILL;
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = BORDER;
+    });
+    headerRow6.height = 32;
+
+    const firstRow = 7;
+    for (let m = 0; m < 12; m++) {
+      const row = firstRow + m;
+      const a = `A${row}`;
+      sm.getCell(a).value = { formula: `DATE($B$4,${m + 1},1)` };
+      sm.getCell(a).numFmt = MONTH_FMT;
+      sm.getCell(a).font = FORMULA_FONT;
+      sm.getCell(a).border = BORDER;
+
+      const start = a;
+      const end = `DATE(YEAR(${a}),MONTH(${a})+1,1)`;
+
+      sm.getCell(`B${row}`).value = { formula: `COUNTIFS(Devis!$A$2:$A$${MAX_ROW},">="&${start},Devis!$A$2:$A$${MAX_ROW},"<"&${end})` };
+      sm.getCell(`C${row}`).value = { formula: `SUMIFS(Devis!$D$2:$D$${MAX_ROW},Devis!$A$2:$A$${MAX_ROW},">="&${start},Devis!$A$2:$A$${MAX_ROW},"<"&${end})` };
+      sm.getCell(`D${row}`).value = { formula: `COUNTIFS(Devis!$A$2:$A$${MAX_ROW},">="&${start},Devis!$A$2:$A$${MAX_ROW},"<"&${end},Devis!$G$2:$G$${MAX_ROW},"Accepté")` };
+      sm.getCell(`E${row}`).value = { formula: `IFERROR(D${row}/B${row},0)` };
+      sm.getCell(`F${row}`).value = { formula: `COUNTIFS(Factures!$A$2:$A$${MAX_ROW},">="&${start},Factures!$A$2:$A$${MAX_ROW},"<"&${end})` };
+      sm.getCell(`G${row}`).value = { formula: `SUMIFS(Factures!$D$2:$D$${MAX_ROW},Factures!$A$2:$A$${MAX_ROW},">="&${start},Factures!$A$2:$A$${MAX_ROW},"<"&${end})` };
+      sm.getCell(`H${row}`).value = { formula: `SUMIFS(Factures!$D$2:$D$${MAX_ROW},Factures!$A$2:$A$${MAX_ROW},">="&${start},Factures!$A$2:$A$${MAX_ROW},"<"&${end},Factures!$G$2:$G$${MAX_ROW},"Payée")` };
+      sm.getCell(`I${row}`).value = { formula: `COUNTIFS(Commandes!$A$2:$A$${MAX_ROW},">="&${start},Commandes!$A$2:$A$${MAX_ROW},"<"&${end})` };
+      sm.getCell(`J${row}`).value = { formula: `SUMIFS(Commandes!$D$2:$D$${MAX_ROW},Commandes!$A$2:$A$${MAX_ROW},">="&${start},Commandes!$A$2:$A$${MAX_ROW},"<"&${end})` };
+      sm.getCell(`K${row}`).value = { formula: `H${row}-J${row}` };
+      sm.getCell(`L${row}`).value = m === 0 ? "" : { formula: `IFERROR((G${row}-G${row - 1})/G${row - 1},"")` };
+
+      for (let col = 2; col <= 12; col++) {
+        const cell = sm.getRow(row).getCell(col);
+        cell.font = FORMULA_FONT;
+        cell.border = BORDER;
+        if ([3, 7, 8, 10, 11].includes(col)) cell.numFmt = CUR_FMT;
+        else if ([5, 12].includes(col)) cell.numFmt = PCT_FMT;
+      }
+    }
+
+    const lastRow = firstRow + 11;
+    const totalRow = lastRow + 1;
+    sm.getCell(`A${totalRow}`).value = "Total annuel";
+    for (let col = 1; col <= 12; col++) {
+      const cell = sm.getRow(totalRow).getCell(col);
+      cell.font = TOTAL_FONT;
+      cell.fill = TOTAL_FILL;
+      cell.border = BORDER;
+    }
+    [[2, "B"], [3, "C"], [4, "D"], [6, "F"], [7, "G"], [8, "H"], [9, "I"], [10, "J"]].forEach(([col, letter]) => {
+      sm.getCell(`${letter}${totalRow}`).value = { formula: `SUM(${letter}${firstRow}:${letter}${lastRow})` };
+      if ([3, 7, 8, 10].includes(col)) sm.getCell(`${letter}${totalRow}`).numFmt = CUR_FMT;
+    });
+    sm.getCell(`E${totalRow}`).value = { formula: `IFERROR(D${totalRow}/B${totalRow},0)` };
+    sm.getCell(`E${totalRow}`).numFmt = PCT_FMT;
+    sm.getCell(`K${totalRow}`).value = { formula: `H${totalRow}-J${totalRow}` };
+    sm.getCell(`K${totalRow}`).numFmt = CUR_FMT;
+
+    const buffer = await wbx.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp2 = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `suivi-complet-devis-factures-commandes-${stamp2}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const importBackup = (file) => {
     const reader = new FileReader();
     reader.onload = async () => {
@@ -5042,7 +5272,7 @@ export default function App() {
         {tab === "parametres" && (
           <SettingsTab
             settings={settings} saveSettings={saveSettings}
-            onExportBackup={exportBackup} onImportBackup={importBackup} onExportExcel={exportExcel}
+            onExportBackup={exportBackup} onImportBackup={importBackup} onExportExcel={exportExcel} onExportSuiviComplet={exportSuiviComplet}
             backupCounts={{
               clients: clients.length, devis: devisList.length, factures: facturesList.length,
               commandes: commandesList.length, fournisseurs: fournisseurs.length, catalog: catalog.length,
