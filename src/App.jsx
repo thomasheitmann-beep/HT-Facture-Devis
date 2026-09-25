@@ -3636,7 +3636,7 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-slate-800">Base clients / sites ({clients.length})</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -3917,7 +3917,7 @@ function CatalogTab({ catalog, saveCatalog }) {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-1">
         <h3 className="font-semibold text-slate-800">Catalogue des prestations</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -4089,7 +4089,7 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-slate-800">Fournisseurs ({fournisseurs.length})</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -4218,7 +4218,7 @@ function CGVTab({ cgv, saveCgv, settings }) {
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-slate-800">Conditions Générales de Vente — Version {settings.versionCGV}</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Btn variant="outline" onClick={() => setShowPrint(true)}><Printer size={15} /> Aperçu / Imprimer</Btn>
           {!editing && <Btn variant="primary" onClick={startEdit}><Pencil size={15} /> Modifier le texte</Btn>}
         </div>
@@ -4238,7 +4238,7 @@ function CGVTab({ cgv, saveCgv, settings }) {
           </div>
           <div className="flex justify-between items-center mt-5">
             <button onClick={resetDefault} className="text-xs text-slate-400 hover:text-red-600 hover:underline">Réinitialiser au texte par défaut</button>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Btn variant="outline" onClick={() => setEditing(false)}>Annuler</Btn>
               <Btn variant="primary" onClick={save}><Check size={15} /> Enregistrer</Btn>
             </div>
@@ -4278,7 +4278,7 @@ function CGVPrintView({ cgv, settings, onClose }) {
       <div className="bg-white w-full sm:max-w-3xl rounded-none sm:rounded-xl shadow-2xl print-area">
         <div className="no-print flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 border-b border-slate-200 sticky top-0 bg-white z-10">
           <span className="text-sm font-medium text-slate-500">Aperçu des CGV</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Btn variant="outline" onClick={() => window.print()}><Printer size={15} /> Imprimer / PDF</Btn>
             <Btn variant="ghost" onClick={onClose}><X size={15} /> Fermer</Btn>
           </div>
