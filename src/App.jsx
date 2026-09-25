@@ -3500,7 +3500,10 @@ function AlphabetIndex({ available, anchorPrefix }) {
   };
 
   return (
-    <div className="fixed left-1 md:left-64 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center bg-white/95 backdrop-blur border border-slate-200 rounded-full py-2 px-0.5 shadow-sm no-print">
+    <div
+      className="fixed left-1 md:left-64 z-20 flex flex-col items-center bg-white/95 backdrop-blur border border-slate-200 rounded-full py-2 px-0.5 shadow-sm no-print"
+      style={{ top: "max(50%, 17rem)", transform: "translateY(-50%)" }}
+    >
       {ALPHABET.map((l) => {
         const has = available.has(l);
         return (
