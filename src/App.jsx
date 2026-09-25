@@ -3493,7 +3493,26 @@ function firstLetterOf(text) {
   return /[A-Z]/.test(c) ? c : "#";
 }
 
-function AlphabetIndex({ available, anchorPrefix }) {
+function AlphabetIndex({ available, anchorPrefix, tableRef }) {
+  const [top, setTop] = useState(200);
+
+  useEffect(() => {
+    const MIN_TOP = 80; // jamais plus haut que ça (laisse toujours la barre visible à l'écran)
+    function updatePosition() {
+      if (tableRef?.current) {
+        const rect = tableRef.current.getBoundingClientRect();
+        setTop(Math.max(rect.top, MIN_TOP));
+      }
+    }
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [tableRef]);
+
   const scrollTo = (letter) => {
     const el = document.getElementById(`${anchorPrefix}-${letter}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3502,7 +3521,7 @@ function AlphabetIndex({ available, anchorPrefix }) {
   return (
     <div
       className="fixed left-1 md:left-64 z-20 flex flex-col items-center bg-white/95 backdrop-blur border border-slate-200 rounded-full py-2 px-0.5 shadow-sm no-print"
-      style={{ top: "max(50%, 17rem)", transform: "translateY(-50%)" }}
+      style={{ top: `${top}px` }}
     >
       {ALPHABET.map((l) => {
         const has = available.has(l);
@@ -3528,6 +3547,7 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
   const [query, setQuery] = useState("");
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef(null);
+  const tableRef = useRef(null);
 
   const blank = () => ({
     id: uid(),
@@ -3682,9 +3702,9 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
         </div>
       )}
 
-      <AlphabetIndex available={availableLetters} anchorPrefix="client-az" />
+      <AlphabetIndex available={availableLetters} anchorPrefix="client-az" tableRef={tableRef} />
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div ref={tableRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
@@ -4003,6 +4023,7 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
   const [query, setQuery] = useState("");
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef(null);
+  const tableRef = useRef(null);
 
   const blank = () => ({
     id: uid(), raisonSociale: "", specialite: "", marques: "", contact: "",
@@ -4136,9 +4157,9 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
         </div>
       )}
 
-      <AlphabetIndex available={availableLetters} anchorPrefix="fourn-az" />
+      <AlphabetIndex available={availableLetters} anchorPrefix="fourn-az" tableRef={tableRef} />
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div ref={tableRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
