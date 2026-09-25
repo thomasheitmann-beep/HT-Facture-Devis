@@ -3724,16 +3724,16 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
               if (isFirstOfLetter) seenLetters.add(letter);
               return (
               <tr key={c.id} id={isFirstOfLetter ? `client-az-${letter}` : undefined} className="border-t border-slate-100 hover:bg-slate-50 scroll-mt-20">
-                <td className="px-4 py-2.5 text-slate-500">{c.code}</td>
-                <td className="px-4 py-2.5">
-                  <button onClick={() => setViewing(c)} className="font-medium text-slate-800 hover:text-amber-600 hover:underline text-left">
+                <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{c.code}</td>
+                <td className="px-4 py-2.5 max-w-[220px]">
+                  <button onClick={() => setViewing(c)} title={c.societe} className="font-medium text-slate-800 hover:text-amber-600 hover:underline text-left truncate block w-full">
                     {c.societe}
                   </button>
                 </td>
-                <td className="px-4 py-2.5 text-slate-600">{c.contact}</td>
-                <td className="px-4 py-2.5 text-slate-600">{c.ville}</td>
-                <td className="px-4 py-2.5 text-slate-600">{c.email}</td>
-                <td className="px-4 py-2.5">
+                <td className="px-4 py-2.5 text-slate-600 max-w-[160px] truncate" title={c.contact}>{c.contact}</td>
+                <td className="px-4 py-2.5 text-slate-600 max-w-[140px] truncate" title={c.ville}>{c.ville}</td>
+                <td className="px-4 py-2.5 text-slate-600 max-w-[200px] truncate" title={c.email}>{c.email}</td>
+                <td className="px-4 py-2.5 whitespace-nowrap">
                   <div className="flex justify-end gap-1">
                     <button title="Dossier client" onClick={() => setViewing(c)} className="p-1.5 text-slate-400 hover:text-amber-600"><FolderOpen size={15} /></button>
                     <button title="Modifier" onClick={() => setEditing(c)} className="p-1.5 text-slate-400 hover:text-slate-700"><Pencil size={15} /></button>
@@ -4179,11 +4179,11 @@ function FournisseursTab({ fournisseurs, saveFournisseurs }) {
               if (isFirstOfLetter) seenLetters.add(letter);
               return (
               <tr key={f.id} id={isFirstOfLetter ? `fourn-az-${letter}` : undefined} className="border-t border-slate-100 hover:bg-slate-50 scroll-mt-20">
-                <td className="px-4 py-2.5 font-medium text-slate-800">{f.raisonSociale}</td>
-                <td className="px-4 py-2.5 text-slate-600">{f.specialite}</td>
-                <td className="px-4 py-2.5 text-slate-600">{f.contact}</td>
-                <td className="px-4 py-2.5 text-slate-600">{f.telephone}</td>
-                <td className="px-4 py-2.5 text-slate-600">{f.email}</td>
+                <td className="px-4 py-2.5 font-medium text-slate-800 max-w-[220px] truncate" title={f.raisonSociale}>{f.raisonSociale}</td>
+                <td className="px-4 py-2.5 text-slate-600 max-w-[220px] truncate" title={f.specialite}>{f.specialite}</td>
+                <td className="px-4 py-2.5 text-slate-600 max-w-[160px] truncate" title={f.contact}>{f.contact}</td>
+                <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{f.telephone}</td>
+                <td className="px-4 py-2.5 text-slate-600 max-w-[200px] truncate" title={f.email}>{f.email}</td>
                 <td className="px-4 py-2.5">
                   <div className="flex justify-end gap-1">
                     <button onClick={() => setEditing(f)} className="p-1.5 text-slate-400 hover:text-slate-700"><Pencil size={15} /></button>
