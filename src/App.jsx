@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import {
   LayoutDashboard, FileText, Receipt, Users, Package, Settings as SettingsIcon,
   Plus, Trash2, Pencil, Copy, ArrowRightLeft, Printer, X, Check, AlertTriangle,
-  ChevronLeft, Search, Zap, CircleDollarSign, Clock, TrendingUp, Upload, Truck, ShoppingCart, FolderOpen, ScrollText, Download, DatabaseBackup, Mail
+  ChevronLeft, Search, Zap, CircleDollarSign, Clock, TrendingUp, Upload, Truck, ShoppingCart, FolderOpen, ScrollText, Download, DatabaseBackup, Mail, FileSpreadsheet
 } from "lucide-react";
 
 /* ---------------------------------------------------------------------- */
@@ -2638,6 +2638,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
       dateEmission: today(),
       echeance: addDays(today(), parseDelaiJours(settings.delaiPaiement)),
       statut: "À émettre",
+      datePaiement: "",
       refDevisId: "",
       refDevisNumero: "",
       type: "Complète",
@@ -2690,9 +2691,19 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
           <TextInput type="date" value={doc.echeance} onChange={(e) => setDoc({ ...doc, echeance: e.target.value })} />
         </Field>
         <Field label="Statut">
-          <Select value={doc.statut} onChange={(e) => setDoc({ ...doc, statut: e.target.value })}>
+          <Select
+            value={doc.statut}
+            onChange={(e) => {
+              const statut = e.target.value;
+              const autoDate = statut === "Payée" && !doc.datePaiement ? today() : doc.datePaiement;
+              setDoc({ ...doc, statut, datePaiement: statut === "Payée" ? autoDate : doc.datePaiement });
+            }}
+          >
             {FACTURE_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
           </Select>
+        </Field>
+        <Field label="Date de paiement">
+          <TextInput type="date" value={doc.datePaiement || ""} onChange={(e) => setDoc({ ...doc, datePaiement: e.target.value })} disabled={doc.statut !== "Payée"} />
         </Field>
         <Field label="Type de facture">
           <Select value={doc.type || "Complète"} onChange={(e) => setDoc({ ...doc, type: e.target.value })}>
@@ -2969,7 +2980,7 @@ function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, cat
   };
 
   const markPaid = (f) => {
-    saveFacturesList(facturesList.map((x) => (x.id === f.id ? { ...x, statut: "Payée" } : x)));
+    saveFacturesList(facturesList.map((x) => (x.id === f.id ? { ...x, statut: "Payée", datePaiement: x.datePaiement || today() } : x)));
   };
 
   if (editing) {
@@ -3025,7 +3036,12 @@ function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, cat
                   </td>
                   <td className="px-4 py-2.5 text-slate-600">{clientName(f.clientId)}</td>
                   <td className="px-4 py-2.5 text-slate-500">{fmtDate(f.echeance)}</td>
-                  <td className="px-4 py-2.5"><StatusBadge statut={st} /></td>
+                  <td className="px-4 py-2.5">
+                    <StatusBadge statut={st} />
+                    {st === "Payée" && f.datePaiement && (
+                      <div className="text-[11px] text-slate-400 mt-0.5">payée le {fmtDate(f.datePaiement)}</div>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-right font-medium text-slate-800">{money(t.ttc)}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex justify-end gap-1">
@@ -4301,7 +4317,7 @@ function CGVPrintView({ cgv, settings, onClose }) {
 /* Settings tab                                                           */
 /* ---------------------------------------------------------------------- */
 
-function SettingsTab({ settings, saveSettings, onExportBackup, onImportBackup, backupCounts }) {
+function SettingsTab({ settings, saveSettings, onExportBackup, onImportBackup, onExportExcel, backupCounts }) {
   const [form, setForm] = useState(settings);
   const dirty = JSON.stringify(form) !== JSON.stringify(settings);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -4425,6 +4441,17 @@ function SettingsTab({ settings, saveSettings, onExportBackup, onImportBackup, b
           <Btn variant="outline" onClick={() => backupInputRef.current?.click()}><Upload size={15} /> Restaurer une sauvegarde</Btn>
           <input ref={backupInputRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportFile} />
         </div>
+      </div>
+
+      <h3 className="font-semibold text-slate-800 mb-4">Export comptable (Excel)</h3>
+      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+        <p className="text-sm text-slate-600 mb-4">
+          Génère un fichier Excel avec un onglet Devis, un onglet Factures et un onglet Commandes — mêmes colonnes que
+          le classeur de suivi mensuel (Date, Numéro, Client/Fournisseur, Montant HT, TVA %, Montant TTC, Statut).
+          Copiez-collez ensuite les lignes dans les onglets correspondants du classeur de suivi pour mettre à jour le
+          tableau de bord.
+        </p>
+        <Btn variant="outline" onClick={onExportExcel}><FileSpreadsheet size={15} /> Exporter en Excel</Btn>
       </div>
 
       <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
@@ -4802,6 +4829,51 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Génère un classeur .xlsx (onglets Devis / Factures / Commandes) avec les
+  // mêmes colonnes que le classeur de suivi mensuel — les lignes exportées
+  // ici peuvent être collées directement dans ses onglets de saisie.
+  const exportExcel = () => {
+    const clientName = (id) => clients.find((c) => c.id === id)?.societe || "";
+    const fournisseurName = (id) => fournisseurs.find((f) => f.id === id)?.raisonSociale || "";
+    const asDate = (iso) => (iso ? new Date(iso) : "");
+
+    const devisRows = [
+      ["Date", "N° devis", "Client", "Montant HT", "TVA %", "Montant TTC", "Statut"],
+      ...devisList.map((d) => {
+        const t = computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA);
+        return [asDate(d.date), d.numero, clientName(d.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), d.statut];
+      }),
+    ];
+    const facturesRows = [
+      ["Date émission", "N° facture", "Client", "Montant HT", "TVA %", "Montant TTC", "Statut", "Date paiement"],
+      ...facturesList.map((f) => {
+        const t = computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA);
+        return [asDate(f.dateEmission), f.numero, clientName(f.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), f.statut, asDate(f.datePaiement)];
+      }),
+    ];
+    const commandesRows = [
+      ["Date", "N° commande", "Fournisseur", "Montant HT", "TVA %", "Montant TTC", "Statut"],
+      ...commandesList.map((c) => {
+        const t = computeTotals(c.lignes, c.remiseGlobale, settings.tauxTVA);
+        return [asDate(c.date), c.numero, fournisseurName(c.fournisseurId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), c.statut];
+      }),
+    ];
+
+    const wbook = XLSX.utils.book_new();
+    const sheetDevis = XLSX.utils.aoa_to_sheet(devisRows);
+    const sheetFactures = XLSX.utils.aoa_to_sheet(facturesRows);
+    const sheetCommandes = XLSX.utils.aoa_to_sheet(commandesRows);
+    sheetDevis["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 12 }];
+    sheetFactures["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 14 }];
+    sheetCommandes["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wbook, sheetDevis, "Devis");
+    XLSX.utils.book_append_sheet(wbook, sheetFactures, "Factures");
+    XLSX.utils.book_append_sheet(wbook, sheetCommandes, "Commandes");
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wbook, `export-devis-factures-commandes-${stamp}.xlsx`);
+  };
+
   const importBackup = (file) => {
     const reader = new FileReader();
     reader.onload = async () => {
@@ -4970,7 +5042,7 @@ export default function App() {
         {tab === "parametres" && (
           <SettingsTab
             settings={settings} saveSettings={saveSettings}
-            onExportBackup={exportBackup} onImportBackup={importBackup}
+            onExportBackup={exportBackup} onImportBackup={importBackup} onExportExcel={exportExcel}
             backupCounts={{
               clients: clients.length, devis: devisList.length, factures: facturesList.length,
               commandes: commandesList.length, fournisseurs: fournisseurs.length, catalog: catalog.length,
