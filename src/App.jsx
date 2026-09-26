@@ -4629,8 +4629,9 @@ function KpiCard({ icon, label, value, sub, accent = "text-slate-800" }) {
   );
 }
 
-function DashboardTab({ devisList, facturesList, commandesList, clients, settings, setTab, openPreview }) {
+function DashboardTab({ devisList, facturesList, commandesList, clients, fournisseurs, settings, setTab, openPreview }) {
   const clientName = (id) => clients.find((c) => c.id === id)?.societe || "—";
+  const fournisseurName = (id) => fournisseurs.find((f) => f.id === id)?.raisonSociale || "—";
 
   const stats = useMemo(() => {
     const tauxTVA = settings.tauxTVA;
@@ -4657,6 +4658,7 @@ function DashboardTab({ devisList, facturesList, commandesList, clients, setting
 
   const recentDevis = [...devisList].sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 5);
   const recentFactures = [...facturesList].sort((a, b) => (b.dateEmission || "").localeCompare(a.dateEmission || "")).slice(0, 5);
+  const recentCommandes = [...commandesList].sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 5);
 
   return (
     <div>
@@ -4693,7 +4695,7 @@ function DashboardTab({ devisList, facturesList, commandesList, clients, setting
         <KpiCard icon={<CircleDollarSign size={14} />} label="Montant engagé achats" value={money(stats.montantEngage)} sub="commandes en cours" />
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4">
+      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
             <h4 className="font-semibold text-slate-800 text-sm">Derniers devis</h4>
@@ -4743,6 +4745,31 @@ function DashboardTab({ devisList, facturesList, commandesList, clients, setting
                   </li>
                 );
               })}
+            </ul>
+          )}
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+            <h4 className="font-semibold text-slate-800 text-sm">Dernières commandes d'achat</h4>
+            <button onClick={() => setTab("achats")} className="text-xs text-amber-600 hover:underline">Voir tout</button>
+          </div>
+          {recentCommandes.length === 0 ? (
+            <div className="px-4 py-6 text-center text-slate-400 text-sm">Aucune commande pour le moment.</div>
+          ) : (
+            <ul>
+              {recentCommandes.map((c) => (
+                <li key={c.id} className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 first:border-t-0 text-sm">
+                  <div>
+                    <div className="font-medium text-slate-800">{c.numero}</div>
+                    <div className="text-xs text-slate-400">{fournisseurName(c.fournisseurId)}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StatusBadge statut={c.statut} />
+                    <button onClick={() => openPreview("commande", c)} className="text-slate-400 hover:text-amber-600"><Printer size={14} /></button>
+                  </div>
+                </li>
+              ))}
             </ul>
           )}
         </div>
@@ -5369,7 +5396,7 @@ export default function App() {
         )}
 
         {tab === "accueil" && (
-          <DashboardTab devisList={devisList} facturesList={facturesList} commandesList={commandesList} clients={clients} settings={settings} setTab={setTab} openPreview={openPreview} />
+          <DashboardTab devisList={devisList} facturesList={facturesList} commandesList={commandesList} clients={clients} fournisseurs={fournisseurs} settings={settings} setTab={setTab} openPreview={openPreview} />
         )}
         {tab === "devis" && (
           <DevisTab
