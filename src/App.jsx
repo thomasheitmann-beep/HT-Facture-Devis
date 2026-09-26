@@ -4695,7 +4695,7 @@ function DashboardTab({ devisList, facturesList, commandesList, clients, fournis
         <KpiCard icon={<CircleDollarSign size={14} />} label="Montant engagé achats" value={money(stats.montantEngage)} sub="commandes en cours" />
       </div>
 
-      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="flex flex-col gap-4">
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
             <h4 className="font-semibold text-slate-800 text-sm">Derniers devis</h4>
