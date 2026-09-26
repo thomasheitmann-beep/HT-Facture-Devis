@@ -2330,6 +2330,89 @@ const FOURNISSEUR_DETAIL_FIELDS = [
   { key: "ville", label: "Ville" },
 ];
 
+// Sélecteur client/fournisseur avec recherche libre (filtre sur tout le nom,
+// pas seulement le début comme un <select> natif) et création à la volée si
+// le nom tapé n'existe pas encore dans la base.
+function PartyAutocomplete({ items, getName, value, onSelect, onCreateNew, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+  const selected = items.find((i) => i.id === value) || null;
+
+  useEffect(() => {
+    setQuery(selected ? getName(selected) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+        setQuery(selected ? getName(selected) : "");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const q = query.trim().toLowerCase();
+  const matches = (q ? items.filter((i) => getName(i).toLowerCase().includes(q)) : items).slice(0, 50);
+  const exactMatch = items.some((i) => getName(i).toLowerCase() === q);
+
+  const pick = (item) => {
+    onSelect(item.id);
+    setQuery(getName(item));
+    setOpen(false);
+  };
+
+  const createAndPick = () => {
+    const name = query.trim();
+    if (!name || !onCreateNew) return;
+    const created = onCreateNew(name);
+    onSelect(created.id);
+    setQuery(getName(created));
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <TextInput
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        className="w-full"
+      />
+      {open && (
+        <div className="absolute z-30 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+          {matches.map((i) => (
+            <button
+              key={i.id}
+              type="button"
+              onClick={() => pick(i)}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-50 last:border-0 truncate"
+            >
+              {getName(i)}
+            </button>
+          ))}
+          {matches.length === 0 && (
+            <div className="px-3 py-2 text-sm text-slate-400">Aucun résultat</div>
+          )}
+          {q && !exactMatch && onCreateNew && (
+            <button
+              type="button"
+              onClick={createAndPick}
+              className="w-full text-left px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 font-medium border-t border-slate-100"
+            >
+              <Plus size={13} className="inline -mt-0.5 mr-1" /> Créer « {query.trim()} »
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PartyDetailsCard({ party, fields, onSave }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(party);
@@ -2464,10 +2547,18 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
           </Select>
         </Field>
         <Field label="Client" className="md:col-span-2">
-          <Select value={doc.clientId} onChange={(e) => setDoc({ ...doc, clientId: e.target.value })}>
-            <option value="">— Sélectionner —</option>
-            {[...clients].sort((a, b) => a.societe.localeCompare(b.societe, "fr", { sensitivity: "base" })).map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
-          </Select>
+          <PartyAutocomplete
+            items={clients}
+            getName={(c) => c.societe}
+            value={doc.clientId}
+            onSelect={(id) => setDoc({ ...doc, clientId: id })}
+            placeholder="Rechercher ou saisir un client…"
+            onCreateNew={(name) => {
+              const created = { id: uid(), code: `CLI-${String(clients.length + 1).padStart(4, "0")}`, societe: name, contact: "", adresse: "", cp: "", ville: "", email: "", telephone: "" };
+              saveClients([...clients, created]);
+              return created;
+            }}
+          />
           <PartyDetailsCard
             party={clients.find((c) => c.id === doc.clientId) || null}
             fields={CLIENT_DETAIL_FIELDS}
@@ -2714,10 +2805,18 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
           </Select>
         </Field>
         <Field label="Client" className="md:col-span-2">
-          <Select value={doc.clientId} onChange={(e) => setDoc({ ...doc, clientId: e.target.value })}>
-            <option value="">— Sélectionner —</option>
-            {[...clients].sort((a, b) => a.societe.localeCompare(b.societe, "fr", { sensitivity: "base" })).map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
-          </Select>
+          <PartyAutocomplete
+            items={clients}
+            getName={(c) => c.societe}
+            value={doc.clientId}
+            onSelect={(id) => setDoc({ ...doc, clientId: id })}
+            placeholder="Rechercher ou saisir un client…"
+            onCreateNew={(name) => {
+              const created = { id: uid(), code: `CLI-${String(clients.length + 1).padStart(4, "0")}`, societe: name, contact: "", adresse: "", cp: "", ville: "", email: "", telephone: "" };
+              saveClients([...clients, created]);
+              return created;
+            }}
+          />
           <PartyDetailsCard
             party={clients.find((c) => c.id === doc.clientId) || null}
             fields={CLIENT_DETAIL_FIELDS}
@@ -3146,10 +3245,18 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
         </Field>
         <Field label="Délai de livraison souhaité"><TextInput value={doc.delaiLivraison} onChange={(e) => setDoc({ ...doc, delaiLivraison: e.target.value })} placeholder="ex. 15 jours" /></Field>
         <Field label="Fournisseur" className="md:col-span-2">
-          <Select value={doc.fournisseurId} onChange={(e) => setDoc({ ...doc, fournisseurId: e.target.value })}>
-            <option value="">— Sélectionner —</option>
-            {[...fournisseurs].sort((a, b) => a.raisonSociale.localeCompare(b.raisonSociale, "fr", { sensitivity: "base" })).map((f) => <option key={f.id} value={f.id}>{f.raisonSociale}</option>)}
-          </Select>
+          <PartyAutocomplete
+            items={fournisseurs}
+            getName={(f) => f.raisonSociale}
+            value={doc.fournisseurId}
+            onSelect={(id) => setDoc({ ...doc, fournisseurId: id })}
+            placeholder="Rechercher ou saisir un fournisseur…"
+            onCreateNew={(name) => {
+              const created = { id: uid(), raisonSociale: name, specialite: "", marques: "", contact: "", telephone: "", email: "", adresse: "", cp: "", ville: "" };
+              saveFournisseurs([...fournisseurs, created]);
+              return created;
+            }}
+          />
           <PartyDetailsCard
             party={fournisseurs.find((f) => f.id === doc.fournisseurId) || null}
             fields={FOURNISSEUR_DETAIL_FIELDS}
@@ -3172,10 +3279,13 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
         {linkChantier && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
             <Field label="Chantier / site (base clients)">
-              <Select value={doc.chantierId} onChange={(e) => setDoc({ ...doc, chantierId: e.target.value })}>
-                <option value="">— Aucun —</option>
-                {[...clients].sort((a, b) => a.societe.localeCompare(b.societe, "fr", { sensitivity: "base" })).map((c) => <option key={c.id} value={c.id}>{c.societe} ({c.code})</option>)}
-              </Select>
+              <PartyAutocomplete
+                items={clients}
+                getName={(c) => c.societe}
+                value={doc.chantierId}
+                onSelect={(id) => setDoc({ ...doc, chantierId: id })}
+                placeholder="Rechercher un site — laisser vide si aucun"
+              />
             </Field>
             <Field label="Repère / référence chantier">
               <TextInput value={doc.chantierRepere} onChange={(e) => setDoc({ ...doc, chantierRepere: e.target.value })} placeholder="ex. numéro d'affaire, repère interne…" />
