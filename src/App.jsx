@@ -281,8 +281,8 @@ function extractHTChiffrage(htmlDoc) {
   });
 
   // Regroupement par poste : une ligne de devis par poste, prix global
-  // (dégressivité/coefficients appliqués), liste des équipements dans la
-  // désignation — même principe que pour un chiffrage FirePro.
+  // (dégressivité/coefficients appliqués) ; le détail des équipements est
+  // conservé en sous-lignes structurées (affichées sans prix individuel).
   const groupes = new Map();
   lignesBrutes.forEach((l) => {
     const poste = l.poste && l.poste !== "—" ? l.poste : "Autres prestations";
@@ -292,8 +292,12 @@ function extractHTChiffrage(htmlDoc) {
 
   const lignes = Array.from(groupes.entries()).map(([poste, items]) => {
     const brut = items.reduce((s, it) => s + it.montantHT, 0);
-    const detail = items.map((it) => `${it.designation}${it.qte > 1 ? ` ×${it.qte}` : ""}`).join(", ");
-    return { designation: `${poste} — ${detail}`, qte: 1, puHT: brut * ratio };
+    return {
+      designation: poste,
+      qte: 1,
+      puHT: brut * ratio,
+      sousLignes: items.map((it) => ({ designation: it.designation, qte: it.qte })),
+    };
   });
 
   return { reference, client, totalHT, famillesChiffrage: Array.from(famillesChiffrage), lignes, famillesNiveaux };
@@ -360,8 +364,12 @@ function extractFireProChiffrage(htmlDoc) {
     .filter((loc) => loc.items.length > 0)
     .map((loc) => {
       const brut = loc.items.reduce((s, it) => s + it.prixUnitaire * it.qte, 0);
-      const detail = loc.items.map((it) => `${it.designation}${it.qte > 1 ? ` ×${it.qte}` : ""}`).join(", ");
-      return { designation: `${loc.nom} — ${detail}`, qte: 1, puHT: brut * ratio };
+      return {
+        designation: loc.nom,
+        qte: 1,
+        puHT: brut * ratio,
+        sousLignes: loc.items.map((it) => ({ designation: it.designation, qte: it.qte })),
+      };
     });
 
   return { reference, client, totalHT, lignes };
@@ -2230,7 +2238,8 @@ function LinesEditor({ lignes, setLignes, catalog }) {
             {lignes.map((l) => {
               const ht = computeLineHT(l);
               return (
-                <tr key={l.id} className="border-t border-slate-100">
+                <React.Fragment key={l.id}>
+                <tr className="border-t border-slate-100">
                   <td className="px-3 py-1.5">
                     <Select
                       value={l.ref}
@@ -2292,6 +2301,19 @@ function LinesEditor({ lignes, setLignes, catalog }) {
                     </button>
                   </td>
                 </tr>
+                {l.sousLignes && l.sousLignes.length > 0 && (
+                  <tr className="bg-slate-50">
+                    <td colSpan={8} className="px-3 pb-2 pt-0.5">
+                      <div className="pl-4 text-xs text-slate-500 space-y-0.5 border-l-2 border-slate-200">
+                        <div className="pl-2 text-[10px] uppercase tracking-wide text-slate-400 font-semibold pt-1">Équipements inclus (import chiffrage — sans prix individuel)</div>
+                        {l.sousLignes.map((sl, i) => (
+                          <div key={i} className="pl-2">{sl.designation}{sl.qte > 1 ? ` (×${sl.qte})` : ""}</div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               );
             })}
             {lignes.length === 0 && (
@@ -2387,6 +2409,7 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, gammeMainten
           .print-area { position: static !important; width: 100% !important; max-width: none !important; padding: 0; margin: 0; box-shadow: none !important; }
           .no-print { display: none !important; }
           .cgv-annexe { page-break-before: always; break-before: page; }
+          .gamme-annexe { page-break-before: always; break-before: page; }
         }
       `}</style>
       <div className="bg-white w-full sm:max-w-3xl rounded-none sm:rounded-xl shadow-2xl print-area">
@@ -2510,14 +2533,26 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, gammeMainten
               {doc.lignes.map((l) => {
                 const ht = computeLineHT(l);
                 return (
-                  <tr key={l.id} className="border-b border-slate-100">
-                    <td className="py-1.5">{l.designation}</td>
+                  <React.Fragment key={l.id}>
+                  <tr className="border-b border-slate-100">
+                    <td className="py-1.5 font-medium">{l.designation}</td>
                     <td className="py-1.5">{l.unite}</td>
                     <td className="py-1.5 text-right">{l.qte}</td>
                     <td className="py-1.5 text-right">{money(Number(l.puHT))}</td>
                     <td className="py-1.5 text-right">{l.remise ? `${l.remise}%` : "—"}</td>
                     <td className="py-1.5 text-right font-medium">{money(ht)}</td>
                   </tr>
+                  {l.sousLignes && l.sousLignes.length > 0 && l.sousLignes.map((sl, i) => (
+                    <tr key={i} className="border-b border-slate-50 text-slate-500">
+                      <td className="py-1 pl-3">{sl.designation}</td>
+                      <td className="py-1"></td>
+                      <td className="py-1 text-right">{sl.qte > 1 ? sl.qte : ""}</td>
+                      <td className="py-1 text-right">—</td>
+                      <td className="py-1 text-right">—</td>
+                      <td className="py-1 text-right">—</td>
+                    </tr>
+                  ))}
+                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -2566,13 +2601,13 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, gammeMainten
                   devis et CGV acceptés ».
                 </p>
                 <div className="grid grid-cols-3 gap-4 mt-4 text-slate-400">
-                  <div>Nom et qualité du signataire :</div>
-                  <div>Date :</div>
-                  <div>Cachet et signature :</div>
+                  <div className="h-20 flex items-end">Nom et qualité du signataire :</div>
+                  <div className="h-20 flex items-end">Date :</div>
+                  <div className="h-20 flex items-end">Cachet et signature :</div>
                 </div>
               </div>
               {(doc.famillesEquipement || []).length > 0 && gammeMaintenance && (
-                <div className="text-xs bg-slate-50 rounded-lg p-3 mb-4">
+                <div className="gamme-annexe text-xs bg-slate-50 rounded-lg p-3 mb-4">
                   <div className="font-semibold text-slate-700 mb-2">Gamme de maintenance associée aux équipements du présent devis</div>
                   <p className="text-slate-500 mb-2">
                     Répartition indicative des opérations entre niveaux 1-2 (exploitant) et niveaux 3-4 (HT Maintenance),
@@ -2875,8 +2910,9 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       if (!confirm(confirmMsg)) return;
 
       const newLines = lignes.map((l) => ({
-        id: uid(), ref: "", designation: l.designation, unite: "U", qte: l.qte,
+        id: uid(), ref: "", designation: l.designation, unite: "Forfait", qte: l.qte,
         puHT: Number(l.puHT.toFixed(2)), remise: 0,
+        sousLignes: l.sousLignes || [],
       }));
       const currentFamilles = doc.famillesEquipement || [];
       const mergedFamilles = Array.from(new Set([...currentFamilles, ...famillesDetectees]));
@@ -3061,8 +3097,8 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
             <div className="text-sm font-medium text-slate-700">Ajouter un document de chiffrage</div>
             <p className="text-xs text-slate-500">
               Importe le fichier .docx d'une offre de chiffrage (HT/BT ou FirePro) : ajoute une ligne par poste/local
-              (équipements listés, prix global sans détail par équipement), et coche les familles concernées avec
-              leurs niveaux de maintenance — la gamme à l'impression sera limitée à ces niveaux.
+              avec un prix global, et détaille chaque équipement en dessous (sans prix individuel). Coche aussi les
+              familles concernées avec leurs niveaux de maintenance — la gamme à l'impression sera limitée à ces niveaux.
             </p>
           </div>
           <input
