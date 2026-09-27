@@ -194,13 +194,32 @@ function parseMontant(s) {
   return Number(cleaned) || 0;
 }
 
+// Interprète la colonne "Niveau" du chiffrage (ex. "Niveau 1-4 (complet)",
+// "Niveau 1-2 (exploitant)", "Niveau 3-4 (HT Maintenance)", ou "—" si non
+// renseigné). En cas de format non reconnu ou absent, on inclut par défaut
+// les deux niveaux pour ne pas risquer d'omettre une opération pertinente.
+function parseNiveauFlags(str) {
+  const s = (str || "").toLowerCase().trim();
+  if (!s || s === "—" || s === "-") return { niveau12: true, niveau34: true };
+  const has1_4 = /1[\s-]*(à|a|-)?[\s]*4|complet/.test(s);
+  const has1_2 = /1[\s-]*(à|a|-)?[\s]*2|exploitant/.test(s);
+  const has3_4 = /3[\s-]*(à|a|-)?[\s]*4|ht maintenance/.test(s);
+  if (has1_4 || (has1_2 && has3_4)) return { niveau12: true, niveau34: true };
+  if (has1_2) return { niveau12: true, niveau34: false };
+  if (has3_4) return { niveau12: false, niveau34: true };
+  return { niveau12: true, niveau34: true };
+}
+
 // Lit un document Word d'offre de chiffrage (structure : un tableau
 // Référence/Client en en-tête, un tableau de lignes avec les colonnes
-// "Poste"/"Famille"/"Montant HT", un tableau récapitulatif avec "Montant HT
-// avant coefficients" et "TOTAL HT OFFRE"). Regroupe les équipements par
-// poste (ex. "Poste Livraison", "Poste Satelite") en appliquant le même
-// ratio de dégressivité/coefficients que le récapitulatif, pour que la
-// somme des postes retombe exactement sur le total de l'offre.
+// "Désignation"/"Poste"/"Famille"/"Niveau"/"Qté"/"Montant HT", un tableau
+// récapitulatif avec "Montant HT avant coefficients" et "TOTAL HT OFFRE").
+// Retourne le détail ligne par ligne (une ligne = un équipement, avec son
+// niveau de maintenance) en appliquant le même ratio de
+// dégressivité/coefficients que le récapitulatif à chaque montant, pour que
+// la somme des lignes retombe exactement sur le total de l'offre — ainsi que
+// le cumul des niveaux réellement présents par famille (pour ajuster la
+// gamme de maintenance à l'impression).
 async function parseChiffrageDocx(file) {
   const arrayBuffer = await file.arrayBuffer();
   const result = await mammoth.convertToHtml({ arrayBuffer });
@@ -218,7 +237,7 @@ async function parseChiffrageDocx(file) {
   let totalHT = 0;
   let montantAvantCoefficients = 0;
   const famillesChiffrage = new Set();
-  const lignesDetail = [];
+  const lignesBrutes = [];
 
   tableRows.forEach((rows) => {
     rows.forEach((row) => {
@@ -229,36 +248,57 @@ async function parseChiffrageDocx(file) {
       if (label.includes("total ht offre") || label.includes("total ht chiffrage")) totalHT = parseMontant(row[1]);
     });
     const header = (rows[0] || []).map((c) => c.trim().toLowerCase());
+    const designationIdx = header.indexOf("désignation");
     const familleIdx = header.indexOf("famille");
     const posteIdx = header.indexOf("poste");
+    const niveauIdx = header.indexOf("niveau");
+    const qteIdx = header.findIndex((c) => c.includes("qté") || c.includes("quantité"));
     const montantIdx = header.findIndex((c) => c.includes("montant"));
-    if (familleIdx !== -1 && montantIdx !== -1) {
+    if (designationIdx !== -1 && montantIdx !== -1) {
       rows.slice(1).forEach((r) => {
-        const f = (r[familleIdx] || "").trim();
-        if (f && f !== "—") famillesChiffrage.add(f);
-        lignesDetail.push({
+        const familleBrute = (r[familleIdx] || "").trim();
+        if (familleBrute && familleBrute !== "—") famillesChiffrage.add(familleBrute);
+        lignesBrutes.push({
+          designation: r[designationIdx] || "",
           poste: (posteIdx !== -1 ? r[posteIdx] : "") || "",
+          familleBrute,
+          niveau: niveauIdx !== -1 ? r[niveauIdx] : "",
+          qte: qteIdx !== -1 ? Number(String(r[qteIdx]).replace(",", ".")) || 1 : 1,
           montantHT: parseMontant(r[montantIdx]),
         });
       });
     }
   });
 
-  // Regroupement par poste (les lignes sans poste, ex. main-d'œuvre /
-  // sous-traitance / composants, sont regroupées ensemble).
-  const groups = new Map();
-  lignesDetail.forEach((l) => {
-    const key = l.poste && l.poste !== "—" ? l.poste : "__AUTRES__";
-    groups.set(key, (groups.get(key) || 0) + l.montantHT);
+  const ratio = montantAvantCoefficients > 0 && totalHT > 0 ? totalHT / montantAvantCoefficients : 1;
+
+  // Cumul, par famille (mappée), des niveaux réellement présents parmi les
+  // équipements de cette famille dans le devis (union : dès qu'un équipement
+  // de la famille nécessite un niveau, il est retenu pour toute la famille).
+  const famillesNiveaux = {};
+  lignesBrutes.forEach((l) => {
+    const rule = CHIFFRAGE_FAMILY_MAP.find((r) => r.match.test(l.familleBrute));
+    if (!rule) return;
+    const flags = parseNiveauFlags(l.niveau);
+    const current = famillesNiveaux[rule.famille] || { niveau12: false, niveau34: false };
+    famillesNiveaux[rule.famille] = {
+      niveau12: current.niveau12 || flags.niveau12,
+      niveau34: current.niveau34 || flags.niveau34,
+    };
   });
 
-  const ratio = montantAvantCoefficients > 0 && totalHT > 0 ? totalHT / montantAvantCoefficients : 1;
-  const postes = Array.from(groups.entries()).map(([poste, montantBrut]) => ({
-    label: poste === "__AUTRES__" ? "Autres prestations (main-d'œuvre, sous-traitance, composants)" : poste,
-    montantHT: montantBrut * ratio,
-  }));
+  const lignes = lignesBrutes.map((l) => {
+    const montantAjuste = l.montantHT * ratio;
+    const poste = l.poste && l.poste !== "—" ? l.poste : "Autres prestations";
+    const niveauLabel = l.niveau && l.niveau !== "—" ? ` (${l.niveau.replace(/^niveau\s*/i, "Niveau ")})` : "";
+    return {
+      designation: `${poste} — ${l.designation}${niveauLabel}`,
+      qte: l.qte || 1,
+      puHT: l.qte ? montantAjuste / l.qte : montantAjuste,
+    };
+  });
 
-  return { reference, client, totalHT, famillesChiffrage: Array.from(famillesChiffrage), postes };
+  return { reference, client, totalHT, famillesChiffrage: Array.from(famillesChiffrage), lignes, famillesNiveaux };
 }
 
 // Contenu extrait de « Gamme de Maintenance Commerciale HT Maintenance » —
@@ -2458,22 +2498,27 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, gammeMainten
                     {(doc.famillesEquipement || []).map((fam) => {
                       const g = gammeMaintenance[fam];
                       if (!g) return null;
+                      const flags = doc.famillesNiveaux?.[fam] || { niveau12: true, niveau34: true };
                       return (
                         <div key={fam}>
                           <div className="font-semibold text-slate-700 mb-1">{fam}</div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div>
-                              <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Niveaux 1-2 — Exploitant</div>
-                              <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
-                                {g.niveau12.map((item, i) => <li key={i}>{item}</li>)}
-                              </ul>
-                            </div>
-                            <div>
-                              <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Niveaux 3-4 — HT Maintenance</div>
-                              <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
-                                {g.niveau34.map((item, i) => <li key={i}>{item}</li>)}
-                              </ul>
-                            </div>
+                            {flags.niveau12 && (
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Niveaux 1-2 — Exploitant</div>
+                                <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
+                                  {g.niveau12.map((item, i) => <li key={i}>{item}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            {flags.niveau34 && (
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Niveaux 3-4 — HT Maintenance</div>
+                                <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
+                                  {g.niveau34.map((item, i) => <li key={i}>{item}</li>)}
+                                </ul>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -2711,6 +2756,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       descriptifTravaux: "",
       descriptifChecklist: [],
       famillesEquipement: [],
+      famillesNiveaux: {},
       lignes: [],
       remiseGlobale: 0,
       documentsManuel: "",
@@ -2729,24 +2775,29 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
     if (!file) return;
     setImportingChiffrage(true);
     try {
-      const { reference, client, totalHT, famillesChiffrage, postes } = await parseChiffrageDocx(file);
-      if (!totalHT || !postes || postes.length === 0) {
+      const { reference, client, totalHT, famillesChiffrage, lignes, famillesNiveaux } = await parseChiffrageDocx(file);
+      if (!totalHT || !lignes || lignes.length === 0) {
         alert(`Impossible de trouver un total HT dans "${file.name}". Vérifiez qu'il s'agit bien d'une offre de chiffrage HT Maintenance.`);
         return;
       }
       const famillesDetectees = mapChiffrageFamilies(famillesChiffrage);
       const summaryFamilles = famillesDetectees.length ? famillesDetectees.join(", ") : "aucune reconnue automatiquement";
-      const suffixeRef = reference ? ` (chiffrage ${reference}${client && client !== "—" ? ` — ${client}` : ""})` : "";
-      const summaryPostes = postes.map((p) => `• ${p.label} : ${money(p.montantHT)}`).join("\n");
-      if (!confirm(`"${file.name}" lu.\n\n${summaryPostes}\n\nTotal HT : ${money(totalHT)}\nFamilles détectées : ${summaryFamilles}\n\nAjouter ${postes.length} ligne(s) (une par poste) au devis et cocher ces familles ?`)) return;
+      const refLabel = reference ? `${reference}${client && client !== "—" ? ` — ${client}` : ""}` : file.name;
+      if (!confirm(`"${file.name}" lu (chiffrage ${refLabel}).\n\n${lignes.length} équipement(s)/prestation(s) détaillé(s)\nTotal HT : ${money(totalHT)}\nFamilles détectées : ${summaryFamilles}\n\nAjouter ces ${lignes.length} ligne(s) au devis et cocher les familles avec leur niveau de maintenance ?`)) return;
 
-      const newLines = postes.map((p) => ({
-        id: uid(), ref: "", designation: `${p.label}${suffixeRef}`, unite: "Forfait", qte: 1,
-        puHT: Number(p.montantHT.toFixed(2)), remise: 0,
+      const newLines = lignes.map((l) => ({
+        id: uid(), ref: "", designation: l.designation, unite: "U", qte: l.qte,
+        puHT: Number(l.puHT.toFixed(2)), remise: 0,
       }));
       const currentFamilles = doc.famillesEquipement || [];
       const mergedFamilles = Array.from(new Set([...currentFamilles, ...famillesDetectees]));
-      setDoc({ ...doc, lignes: [...doc.lignes, ...newLines], famillesEquipement: mergedFamilles });
+      const currentNiveaux = doc.famillesNiveaux || {};
+      const mergedNiveaux = { ...currentNiveaux };
+      Object.entries(famillesNiveaux || {}).forEach(([fam, flags]) => {
+        const cur = mergedNiveaux[fam] || { niveau12: false, niveau34: false };
+        mergedNiveaux[fam] = { niveau12: cur.niveau12 || flags.niveau12, niveau34: cur.niveau34 || flags.niveau34 };
+      });
+      setDoc({ ...doc, lignes: [...doc.lignes, ...newLines], famillesEquipement: mergedFamilles, famillesNiveaux: mergedNiveaux });
     } catch (err) {
       alert(`Impossible de lire "${file.name}". Vérifiez qu'il s'agit bien d'un fichier .docx.`);
     } finally {
@@ -2920,8 +2971,9 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
           <div>
             <div className="text-sm font-medium text-slate-700">Ajouter un document de chiffrage</div>
             <p className="text-xs text-slate-500">
-              Importe le fichier .docx d'une offre de chiffrage : ajoute une ligne par poste (montant global, sans le
-              détail des équipements) et coche automatiquement les familles concernées ci-dessous.
+              Importe le fichier .docx d'une offre de chiffrage : ajoute une ligne par équipement/prestation (groupée
+              par poste, niveau de maintenance indiqué), et coche les familles ci-dessous avec les niveaux concernés
+              — la gamme de maintenance à l'impression sera limitée à ces niveaux.
             </p>
           </div>
           <input
@@ -2941,26 +2993,38 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         <div className="text-sm font-medium text-slate-700 mb-1">Familles d'équipements concernées</div>
         <p className="text-xs text-slate-400 mb-3">
           Cochez les familles présentes dans ce devis (issues du chiffrage) — seul le total chiffré apparaît dans le
-          tableau ci-dessus ; la gamme de maintenance correspondante s'ajoutera automatiquement à l'impression du devis.
+          tableau ci-dessus ; la gamme de maintenance correspondante (limitée aux niveaux détectés) s'ajoutera
+          automatiquement à l'impression du devis.
         </p>
         <div className="flex flex-col gap-1.5">
-          {EQUIPMENT_FAMILIES.map((fam) => (
-            <label key={fam} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={(doc.famillesEquipement || []).includes(fam)}
-                onChange={(e) => {
-                  const current = doc.famillesEquipement || [];
-                  setDoc({
-                    ...doc,
-                    famillesEquipement: e.target.checked ? [...current, fam] : current.filter((x) => x !== fam),
-                  });
-                }}
-                className="rounded border-slate-300"
-              />
-              {fam}
-            </label>
-          ))}
+          {EQUIPMENT_FAMILIES.map((fam) => {
+            const checked = (doc.famillesEquipement || []).includes(fam);
+            const flags = doc.famillesNiveaux?.[fam];
+            let niveauLabel = "";
+            if (checked && flags) {
+              if (flags.niveau12 && flags.niveau34) niveauLabel = "niveaux 1-4";
+              else if (flags.niveau12) niveauLabel = "niveaux 1-2 uniquement";
+              else if (flags.niveau34) niveauLabel = "niveaux 3-4 uniquement";
+            }
+            return (
+              <label key={fam} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    const current = doc.famillesEquipement || [];
+                    setDoc({
+                      ...doc,
+                      famillesEquipement: e.target.checked ? [...current, fam] : current.filter((x) => x !== fam),
+                    });
+                  }}
+                  className="rounded border-slate-300"
+                />
+                {fam}
+                {niveauLabel && <span className="text-xs text-amber-600">({niveauLabel})</span>}
+              </label>
+            );
+          })}
         </div>
       </div>
 
