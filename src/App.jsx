@@ -210,21 +210,14 @@ function parseNiveauFlags(str) {
   return { niveau12: true, niveau34: true };
 }
 
-// Lit un document Word d'offre de chiffrage (structure : un tableau
-// Référence/Client en en-tête, un tableau de lignes avec les colonnes
-// "Désignation"/"Poste"/"Famille"/"Niveau"/"Qté"/"Montant HT", un tableau
-// récapitulatif avec "Montant HT avant coefficients" et "TOTAL HT OFFRE").
-// Retourne le détail ligne par ligne (une ligne = un équipement, avec son
-// niveau de maintenance) en appliquant le même ratio de
-// dégressivité/coefficients que le récapitulatif à chaque montant, pour que
-// la somme des lignes retombe exactement sur le total de l'offre — ainsi que
-// le cumul des niveaux réellement présents par famille (pour ajuster la
-// gamme de maintenance à l'impression).
-async function parseChiffrageDocx(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const result = await mammoth.convertToHtml({ arrayBuffer });
-  const parser = new DOMParser();
-  const htmlDoc = parser.parseFromString(result.value, "text/html");
+// Extrait les données d'un chiffrage HT/BT électrique (tableau avec colonnes
+// "Désignation"/"Poste"/"Famille"/"Niveau"/"Qté"/"Montant HT", récapitulatif
+// "Montant HT avant coefficients" / "TOTAL HT OFFRE"). Retourne le détail
+// ligne par ligne (une ligne = un équipement, avec son niveau de maintenance)
+// en appliquant le ratio de dégressivité/coefficients du récapitulatif à
+// chaque montant, ainsi que le cumul des niveaux réellement présents par
+// famille (pour ajuster la gamme de maintenance à l'impression).
+function extractHTChiffrage(htmlDoc) {
   const tables = Array.from(htmlDoc.querySelectorAll("table"));
   const tableRows = tables.map((table) =>
     Array.from(table.querySelectorAll("tr")).map((tr) =>
@@ -287,18 +280,109 @@ async function parseChiffrageDocx(file) {
     };
   });
 
-  const lignes = lignesBrutes.map((l) => {
-    const montantAjuste = l.montantHT * ratio;
+  // Regroupement par poste : une ligne de devis par poste, prix global
+  // (dégressivité/coefficients appliqués), liste des équipements dans la
+  // désignation — même principe que pour un chiffrage FirePro.
+  const groupes = new Map();
+  lignesBrutes.forEach((l) => {
     const poste = l.poste && l.poste !== "—" ? l.poste : "Autres prestations";
-    const niveauLabel = l.niveau && l.niveau !== "—" ? ` (${l.niveau.replace(/^niveau\s*/i, "Niveau ")})` : "";
-    return {
-      designation: `${poste} — ${l.designation}${niveauLabel}`,
-      qte: l.qte || 1,
-      puHT: l.qte ? montantAjuste / l.qte : montantAjuste,
-    };
+    if (!groupes.has(poste)) groupes.set(poste, []);
+    groupes.get(poste).push(l);
+  });
+
+  const lignes = Array.from(groupes.entries()).map(([poste, items]) => {
+    const brut = items.reduce((s, it) => s + it.montantHT, 0);
+    const detail = items.map((it) => `${it.designation}${it.qte > 1 ? ` ×${it.qte}` : ""}`).join(", ");
+    return { designation: `${poste} — ${detail}`, qte: 1, puHT: brut * ratio };
   });
 
   return { reference, client, totalHT, famillesChiffrage: Array.from(famillesChiffrage), lignes, famillesNiveaux };
+}
+
+// Extrait les données d'un chiffrage FirePro (extinction automatique) :
+// un ou plusieurs "Local N" (titres de section) suivis chacun d'un tableau
+// d'équipements "Désignation"/"Prix unitaire"/"Qté", récapitulatif "Montant
+// HT avant coefficient" / "TOTAL HT FIREPRO". Une ligne de devis par local,
+// listant les équipements présents mais avec un seul prix global par local
+// (pas de prix par équipement) — le ratio de coefficient/ajustement du
+// récapitulatif est appliqué à ce prix global.
+function extractFireProChiffrage(htmlDoc) {
+  const tables = Array.from(htmlDoc.querySelectorAll("table"));
+  const kvRows = tables.flatMap((table) =>
+    Array.from(table.querySelectorAll("tr")).map((tr) =>
+      Array.from(tr.querySelectorAll("td,th")).map((td) => td.textContent.trim())
+    )
+  );
+
+  let reference = "";
+  let client = "";
+  let totalHT = 0;
+  let montantAvant = 0;
+  kvRows.forEach((row) => {
+    const label = (row[0] || "").trim().toLowerCase();
+    if (label === "référence" && row[1]) reference = row[1];
+    if (label === "client" && row[1]) client = row[1];
+    if (label.includes("montant ht avant coefficient")) montantAvant = parseMontant(row[1]);
+    if (label.includes("total ht firepro")) totalHT = parseMontant(row[1]);
+  });
+
+  // Parcourt le corps du document dans l'ordre pour associer chaque tableau
+  // d'équipements au titre "Local N" qui le précède.
+  const locaux = [];
+  let courant = null;
+  Array.from(htmlDoc.body.children).forEach((el) => {
+    const tag = el.tagName.toLowerCase();
+    if (/^h[1-6]$/.test(tag) && /^local\s/i.test(el.textContent.trim())) {
+      courant = { nom: el.textContent.trim(), items: [] };
+      locaux.push(courant);
+    } else if (tag === "table" && courant) {
+      const rows = Array.from(el.querySelectorAll("tr")).map((tr) =>
+        Array.from(tr.querySelectorAll("td,th")).map((td) => td.textContent.trim())
+      );
+      const header = (rows[0] || []).map((c) => c.trim().toLowerCase());
+      const designationIdx = header.indexOf("désignation");
+      if (designationIdx !== -1) {
+        const prixIdx = header.findIndex((c) => c.includes("prix"));
+        const qteIdx = header.findIndex((c) => c.includes("qté") || c.includes("quantité"));
+        rows.slice(1).forEach((r) => {
+          courant.items.push({
+            designation: r[designationIdx] || "",
+            prixUnitaire: prixIdx !== -1 ? parseMontant(r[prixIdx]) : 0,
+            qte: qteIdx !== -1 ? Number(String(r[qteIdx]).replace(",", ".")) || 1 : 1,
+          });
+        });
+      }
+    }
+  });
+
+  const ratio = montantAvant > 0 && totalHT > 0 ? totalHT / montantAvant : 1;
+  const lignes = locaux
+    .filter((loc) => loc.items.length > 0)
+    .map((loc) => {
+      const brut = loc.items.reduce((s, it) => s + it.prixUnitaire * it.qte, 0);
+      const detail = loc.items.map((it) => `${it.designation}${it.qte > 1 ? ` ×${it.qte}` : ""}`).join(", ");
+      return { designation: `${loc.nom} — ${detail}`, qte: 1, puHT: brut * ratio };
+    });
+
+  return { reference, client, totalHT, lignes };
+}
+
+// Point d'entrée unique : lit le fichier, convertit en HTML, puis choisit le
+// bon extracteur selon le type de chiffrage détecté dans le document (HT/BT
+// électrique ou FirePro).
+async function parseChiffrageDocx(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.convertToHtml({ arrayBuffer });
+  const parser = new DOMParser();
+  const htmlDoc = parser.parseFromString(result.value, "text/html");
+  const fullText = (htmlDoc.body.textContent || "").toLowerCase();
+
+  if (fullText.includes("total ht firepro")) {
+    const data = extractFireProChiffrage(htmlDoc);
+    return { kind: "firepro", famillesChiffrage: [], famillesNiveaux: {}, ...data };
+  }
+  const data = extractHTChiffrage(htmlDoc);
+  return { kind: "ht", ...data };
 }
 
 // Contenu extrait de « Gamme de Maintenance Commerciale HT Maintenance » —
@@ -2775,15 +2859,20 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
     if (!file) return;
     setImportingChiffrage(true);
     try {
-      const { reference, client, totalHT, famillesChiffrage, lignes, famillesNiveaux } = await parseChiffrageDocx(file);
+      const { kind, reference, client, totalHT, famillesChiffrage, lignes, famillesNiveaux } = await parseChiffrageDocx(file);
       if (!totalHT || !lignes || lignes.length === 0) {
-        alert(`Impossible de trouver un total HT dans "${file.name}". Vérifiez qu'il s'agit bien d'une offre de chiffrage HT Maintenance.`);
+        alert(`Impossible de trouver un total HT dans "${file.name}". Vérifiez qu'il s'agit bien d'une offre de chiffrage HT Maintenance ou FirePro.`);
         return;
       }
       const famillesDetectees = mapChiffrageFamilies(famillesChiffrage);
-      const summaryFamilles = famillesDetectees.length ? famillesDetectees.join(", ") : "aucune reconnue automatiquement";
       const refLabel = reference ? `${reference}${client && client !== "—" ? ` — ${client}` : ""}` : file.name;
-      if (!confirm(`"${file.name}" lu (chiffrage ${refLabel}).\n\n${lignes.length} équipement(s)/prestation(s) détaillé(s)\nTotal HT : ${money(totalHT)}\nFamilles détectées : ${summaryFamilles}\n\nAjouter ces ${lignes.length} ligne(s) au devis et cocher les familles avec leur niveau de maintenance ?`)) return;
+      const familleLine = kind === "ht"
+        ? `\nFamilles détectées : ${famillesDetectees.length ? famillesDetectees.join(", ") : "aucune reconnue automatiquement"}`
+        : "";
+      const confirmMsg = kind === "ht"
+        ? `"${file.name}" lu (chiffrage ${refLabel}).\n\n${lignes.length} poste(s) détecté(s)\nTotal HT : ${money(totalHT)}${familleLine}\n\nAjouter ces ${lignes.length} ligne(s) (une par poste, prix global) au devis et cocher les familles avec leur niveau de maintenance ?`
+        : `"${file.name}" lu (chiffrage FirePro ${refLabel}).\n\n${lignes.length} local/locaux détecté(s)\nTotal HT : ${money(totalHT)}\n\nAjouter ces ${lignes.length} ligne(s) au devis (détail des équipements par local, prix global par local) ?`;
+      if (!confirm(confirmMsg)) return;
 
       const newLines = lignes.map((l) => ({
         id: uid(), ref: "", designation: l.designation, unite: "U", qte: l.qte,
@@ -2971,9 +3060,9 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
           <div>
             <div className="text-sm font-medium text-slate-700">Ajouter un document de chiffrage</div>
             <p className="text-xs text-slate-500">
-              Importe le fichier .docx d'une offre de chiffrage : ajoute une ligne par équipement/prestation (groupée
-              par poste, niveau de maintenance indiqué), et coche les familles ci-dessous avec les niveaux concernés
-              — la gamme de maintenance à l'impression sera limitée à ces niveaux.
+              Importe le fichier .docx d'une offre de chiffrage (HT/BT ou FirePro) : ajoute une ligne par poste/local
+              (équipements listés, prix global sans détail par équipement), et coche les familles concernées avec
+              leurs niveaux de maintenance — la gamme à l'impression sera limitée à ces niveaux.
             </p>
           </div>
           <input
