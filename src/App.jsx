@@ -450,7 +450,7 @@ const GAMME_MAINTENANCE_DEFAULT = {
     niveau34: [
       "Résistance de contact des chambres de coupure",
       "Essais de manœuvre et temps de fonctionnement",
-      "Contrôle et réglage des relais de protection",
+      "Test des relais de protection : fonctions 50/51 et 50N/51N uniquement",
       "Vérification des transformateurs de courant (TC)",
       "Couples de serrage des connexions",
     ],
