@@ -3,7 +3,8 @@ import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import * as mammoth from "mammoth";
 import { signOut } from "firebase/auth";
-import { auth } from "./firebase.js";
+import { collection, doc, getDocs, writeBatch } from "firebase/firestore";
+import { auth, db } from "./firebase.js";
 import {
   LayoutDashboard, FileText, Receipt, Users, Package, Settings as SettingsIcon,
   Plus, Trash2, Pencil, Copy, ArrowRightLeft, Printer, X, Check, AlertTriangle,
@@ -2175,6 +2176,50 @@ async function loadKey(key, fallback) {
 
 async function saveKey(key, value) {
   await window.storage.set(key, JSON.stringify(value), false);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Base de contacts partagée entre toutes les applications HT Maintenance */
+/* ---------------------------------------------------------------------- */
+// Collection Firestore commune (hors du stockage propre à cette app) — un
+// document par contact, identifiable et modifiable depuis n'importe quelle
+// application connectée au même projet Firebase. Toutes les apps qui
+// veulent partager les contacts doivent lire/écrire dans cette même
+// collection, avec la même forme de document.
+const CONTACTS_COLLECTION = "contacts-ht-maintenance";
+
+async function loadContactsShared() {
+  const snap = await getDocs(collection(db, CONTACTS_COLLECTION));
+  const list = [];
+  snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+  return list;
+}
+
+// Diffe la nouvelle liste de contacts par rapport à la précédente et
+// n'écrit que ce qui a changé (ajouts/modifications/suppressions), par
+// lots de 450 opérations (marge sous la limite Firestore de 500/batch).
+async function syncContactsToShared(newClients, previousClients) {
+  const prevIds = new Set((previousClients || []).map((c) => c.id));
+  const newIds = new Set(newClients.map((c) => c.id));
+  const toDelete = [...prevIds].filter((id) => !newIds.has(id));
+
+  const ops = [];
+  newClients.forEach((c) => {
+    const { id, ...rest } = c;
+    ops.push({ type: "set", id, data: rest });
+  });
+  toDelete.forEach((id) => ops.push({ type: "delete", id }));
+
+  const CHUNK = 450;
+  for (let i = 0; i < ops.length; i += CHUNK) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + CHUNK).forEach((op) => {
+      const ref = doc(db, CONTACTS_COLLECTION, op.id);
+      if (op.type === "set") batch.set(ref, op.data);
+      else batch.delete(ref);
+    });
+    await batch.commit();
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -5570,7 +5615,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [s, c, cat, d, f, four, cda, cgvData, gammeData] = await Promise.all([
+      const [s, legacyClients, cat, d, f, four, cda, cgvData, gammeData] = await Promise.all([
         loadKey("settings", DEFAULT_SETTINGS),
         loadKey("clients", []),
         loadKey("catalog", SEED_CATALOG),
@@ -5581,8 +5626,26 @@ export default function App() {
         loadKey("cgv", { intro: CGV_INTRO, articles: CGV_ARTICLES_DEFAULT }),
         loadKey("gammeMaintenance", GAMME_MAINTENANCE_DEFAULT),
       ]);
+
+      // Base de contacts partagée entre applications : si elle est encore
+      // vide et que cette app a des clients dans son ancien stockage propre,
+      // on les y recopie une seule fois (migration automatique, sans risque
+      // à rejouer : mêmes identifiants = même résultat).
+      let sharedClients = legacyClients;
+      try {
+        const shared = await loadContactsShared();
+        if (shared.length === 0 && legacyClients.length > 0) {
+          await syncContactsToShared(legacyClients, []);
+          sharedClients = legacyClients;
+        } else {
+          sharedClients = shared;
+        }
+      } catch (e) {
+        sharedClients = legacyClients;
+      }
+
       setSettings(s);
-      setClients(c);
+      setClients(sharedClients);
       setCatalog(cat);
       setDevisList(d);
       setFacturesList(f);
@@ -5604,7 +5667,15 @@ export default function App() {
   }, []);
 
   const saveSettings = persist("settings", setSettings);
-  const saveClients = persist("clients", setClients);
+  const saveClients = async (newClients) => {
+    const previous = clients;
+    setClients(newClients);
+    try {
+      await syncContactsToShared(newClients, previous);
+    } catch (e) {
+      setSaveError("Échec de l'enregistrement — vos dernières modifications n'ont peut-être pas été sauvegardées.");
+    }
+  };
   const saveCatalog = persist("catalog", setCatalog);
   const saveDevisList = persist("devis", setDevisList);
   const saveFacturesList = persist("factures", setFacturesList);
