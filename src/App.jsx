@@ -2441,26 +2441,106 @@ function splitIntoColumns(articles, n) {
 
 // Construit un lien mailto: pré-rempli (destinataire, objet, corps) pour
 // un devis, une facture ou une commande — réutilisable partout dans l'app
-// (liste, formulaire d'édition, aperçu imprimable).
+// (liste, formulaire d'édition, aperçu imprimable). Le message est adapté au
+// type de document, personnalisé (interlocuteur, objet, montants, échéances,
+// coordonnées bancaires) et structuré en blocs courts.
+// Limite des navigateurs : une pièce jointe ne peut pas être ajoutée
+// automatiquement — le message invite donc à joindre le PDF.
 function buildMailtoLink(doc, party, settings, docKind) {
   const email = party?.email || "";
-  const contact = party?.contact || party?.societe || party?.raisonSociale || "";
-  const kindLabel = docKind === "devis" ? "Devis" : docKind === "commande" ? "Commande" : "Facture";
-  const kindWord = docKind === "devis" ? "devis" : docKind === "commande" ? "bon de commande" : "facture";
-  const subject = encodeURIComponent(`${kindLabel} ${doc.numero} — ${settings.entreprise}`);
-  const body = encodeURIComponent(
-    [
-      `Bonjour${contact ? ` ${contact}` : ""},`,
-      "",
-      `Veuillez trouver ci-joint notre ${kindWord} n° ${doc.numero}.`,
-      "",
-      "N'hésitez pas à nous contacter pour toute question.",
-      "",
-      "Cordialement,",
-      settings.entreprise,
-    ].join("\n")
-  );
-  return `mailto:${email}?subject=${subject}&body=${body}`;
+  const clean = (s) => String(s || "").replace(/[\u202f\u00a0]/g, " ").trim();
+  const eur = (n) => clean(money(n));
+  const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trim()}…` : s);
+
+  // Interlocuteur : on n'utilise le champ "contact" que s'il ressemble à un
+  // nom (pas de chiffres, pas d'e-mail, pas trop long) ; sinon formule neutre.
+  const rawContact = clean(party?.contact);
+  const looksLikeName = rawContact && rawContact.length <= 40 && !/[\d@]/.test(rawContact) && !rawContact.includes(",");
+  const greeting = looksLikeName ? `Bonjour ${rawContact},` : "Bonjour,";
+
+  const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
+  const objet = clean(doc.objet);
+  const isDevis = docKind === "devis";
+  const isCommande = docKind === "commande";
+  const isAcompte = !isDevis && !isCommande && doc.type && doc.type !== "Complète";
+
+  const dateDoc = isDevis || isCommande ? doc.date : doc.dateEmission;
+  const lines = [];
+  const kv = (label, value) => { if (value) lines.push(`  • ${label} : ${value}`); };
+
+  let subject;
+  let intro;
+  let closing;
+
+  if (isDevis) {
+    subject = `Devis ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
+    intro = `Suite à nos échanges, veuillez trouver ci-joint notre devis n° ${doc.numero}${objet ? ` relatif à : ${objet}` : ""}.`;
+    kv("Référence", doc.numero);
+    kv("Date", fmtDate(dateDoc));
+    if (doc.refClient) kv("Votre référence", clean(doc.refClient));
+    kv("Montant HT", eur(totals.totalHT));
+    kv("Montant TTC", eur(totals.ttc));
+    if (doc.validiteJours) kv("Validité", `${doc.validiteJours} jours (jusqu'au ${fmtDate(addDays(doc.date, doc.validiteJours))})`);
+    closing = [
+      "Pour donner suite, il vous suffit de nous retourner ce devis daté, signé et revêtu de votre cachet, avec la mention « Bon pour accord ».",
+      "Nous restons à votre disposition pour en discuter ou l'ajuster à votre besoin.",
+    ];
+  } else if (isCommande) {
+    subject = `Commande ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
+    intro = `Veuillez trouver ci-joint notre bon de commande n° ${doc.numero}${objet ? ` (${objet})` : ""}.`;
+    kv("Référence", doc.numero);
+    kv("Date", fmtDate(dateDoc));
+    kv("Montant HT", eur(totals.totalHT));
+    kv("Montant TTC", eur(totals.ttc));
+    closing = ["Merci de nous confirmer la bonne réception de cette commande ainsi que le délai de livraison prévu."];
+  } else {
+    subject = `${isAcompte ? `Facture d'${String(doc.type).toLowerCase()}` : "Facture"} ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
+    intro = `Veuillez trouver ci-joint notre ${isAcompte ? `facture d'${String(doc.type).toLowerCase()}` : "facture"} n° ${doc.numero}${objet ? ` relative à : ${objet}` : ""}.`;
+    kv("Référence", doc.numero);
+    if (doc.refDevisNumero) kv("Devis associé", doc.refDevisNumero);
+    kv("Date d'émission", fmtDate(dateDoc));
+    kv("Montant HT", eur(totals.totalHT));
+    kv("Montant TTC", eur(totals.ttc));
+    if (doc.statut !== "Payée") kv("Échéance", fmtDate(doc.echeance));
+    if (doc.statut === "Payée") {
+      closing = [
+        `Nous accusons réception de votre règlement${doc.datePaiement ? ` du ${fmtDate(doc.datePaiement)}` : ""} : cette facture est acquittée et vous est transmise pour vos archives.`,
+        "Nous vous remercions de votre confiance.",
+      ];
+    } else {
+      closing = [];
+      const pay = [];
+      if (settings.iban) pay.push(`Règlement par virement : IBAN ${clean(settings.iban)}${settings.bic ? ` – BIC ${clean(settings.bic)}` : ""}`);
+      pay.push(`Merci d'indiquer la référence ${doc.numero} lors du règlement.`);
+      if (settings.delaiPaiement) pay.push(`Conditions de paiement : ${clean(settings.delaiPaiement)}.`);
+      closing.push(pay.join("\r\n"));
+      closing.push("Pour toute question sur cette facture, n'hésitez pas à nous contacter.");
+    }
+  }
+
+  const signature = [
+    "Cordialement,",
+    "",
+    clean(settings.dirigeant),
+    clean(settings.entreprise),
+    [clean(settings.telephone), clean(settings.email)].filter(Boolean).join(" · "),
+  ].filter((l, i) => i < 2 || l);
+
+  const body = [
+    greeting,
+    "",
+    intro,
+    "",
+    "Récapitulatif :",
+    ...lines,
+    "",
+    ...closing.flatMap((p) => [p, ""]),
+    "Vous trouverez le document au format PDF en pièce jointe.",
+    "",
+    ...signature,
+  ].join("\r\n");
+
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
 function PrintableDoc({ type, doc, client, chantier, settings, cgv, gammeMaintenance, onClose }) {
