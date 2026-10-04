@@ -2470,11 +2470,13 @@ function buildMailtoLink(doc, party, settings, docKind) {
 
   let subject;
   let intro;
+  let story;
   let closing;
 
   if (isDevis) {
     subject = `Devis ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
     intro = `Suite à nos échanges, veuillez trouver ci-joint notre devis n° ${doc.numero}${objet ? ` relatif à : ${objet}` : ""}.`;
+    story = `Cette proposition a été établie à partir de notre échange et de vos besoins. Elle couvre l'ensemble des prestations détaillées dans le document joint, pour un montant de ${eur(totals.totalHT)} HT, soit ${eur(totals.ttc)} TTC${doc.validiteJours ? `, et reste valable jusqu'au ${fmtDate(addDays(doc.date, doc.validiteJours))}` : ""}. Si certains points méritent d'être précisés ou ajustés (périmètre, planning, accès au site), nous en discuterons volontiers ensemble.`;
     kv("Référence", doc.numero);
     kv("Date", fmtDate(dateDoc));
     if (doc.refClient) kv("Votre référence", clean(doc.refClient));
@@ -2483,11 +2485,11 @@ function buildMailtoLink(doc, party, settings, docKind) {
     if (doc.validiteJours) kv("Validité", `${doc.validiteJours} jours (jusqu'au ${fmtDate(addDays(doc.date, doc.validiteJours))})`);
     closing = [
       "Pour donner suite, il vous suffit de nous retourner ce devis daté, signé et revêtu de votre cachet, avec la mention « Bon pour accord ».",
-      "Nous restons à votre disposition pour en discuter ou l'ajuster à votre besoin.",
     ];
   } else if (isCommande) {
     subject = `Commande ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
     intro = `Veuillez trouver ci-joint notre bon de commande n° ${doc.numero}${objet ? ` (${objet})` : ""}.`;
+    story = `Cette commande porte sur les fournitures et prestations détaillées dans le document joint, pour un montant de ${eur(totals.totalHT)} HT (${eur(totals.ttc)} TTC). Si un point appelle une précision de votre côté (références, disponibilité, conditionnement), merci de nous le signaler rapidement.`;
     kv("Référence", doc.numero);
     kv("Date", fmtDate(dateDoc));
     kv("Montant HT", eur(totals.totalHT));
@@ -2496,6 +2498,10 @@ function buildMailtoLink(doc, party, settings, docKind) {
   } else {
     subject = `${isAcompte ? `Facture d'${String(doc.type).toLowerCase()}` : "Facture"} ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
     intro = `Veuillez trouver ci-joint notre ${isAcompte ? `facture d'${String(doc.type).toLowerCase()}` : "facture"} n° ${doc.numero}${objet ? ` relative à : ${objet}` : ""}.`;
+    story = doc.statut === "Payée"
+      ? `Elle correspond aux prestations réalisées et ne nécessite plus aucune action de votre part.`
+      : `Cette facture correspond aux prestations réalisées. Le montant à régler s'élève à ${eur(totals.ttc)} TTC, avec une échéance au ${fmtDate(doc.echeance)}. `
+        + "Si un document complémentaire est nécessaire à son traitement (bon de commande, numéro d'engagement), nous vous le transmettons rapidement.";
     kv("Référence", doc.numero);
     if (doc.refDevisNumero) kv("Devis associé", doc.refDevisNumero);
     kv("Date d'émission", fmtDate(dateDoc));
@@ -2531,7 +2537,9 @@ function buildMailtoLink(doc, party, settings, docKind) {
     "",
     intro,
     "",
-    "Récapitulatif :",
+    story,
+    "",
+    "En résumé :",
     ...lines,
     "",
     ...closing.flatMap((p) => [p, ""]),
