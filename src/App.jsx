@@ -2568,7 +2568,7 @@ function buildMailtoLink(doc, party, settings, docKind) {
   return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function PrintableDoc({ type, doc, client, chantier, settings, cgv, gammeMaintenance, onClose }) {
+function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeMaintenance, onClose }) {
   const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
   const isDevis = type === "devis";
   const isCommande = type === "commande";
@@ -2682,6 +2682,15 @@ function PrintableDoc({ type, doc, client, chantier, settings, cgv, gammeMainten
                 </div>
               )}
             </div>
+            {!isCommande && site && (
+              <div className="bg-slate-50 rounded-lg p-3 sm:col-span-2">
+                <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">Site d'intervention</div>
+                <div className="font-medium text-slate-800">{site.societe}</div>
+                {site.adresse && <div className="text-slate-500">{site.adresse}</div>}
+                <div className="text-slate-500">{site.cp} {site.ville}</div>
+                {site.pays && <div className="text-slate-500">{site.pays}</div>}
+              </div>
+            )}
           </div>
 
           {isDevis && buildPreambuleText(doc) && (
@@ -3098,6 +3107,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       clientId: clients[0]?.id || "",
       objet: "Intervention de maintenance",
       refClient: "",
+      siteId: "",
       preambuleInclure: false,
       preambuleHoraire: HORAIRE_PRESETS[0],
       preambuleHoraireCustom: "",
@@ -3240,6 +3250,26 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         </Field>
         <Field label="Référence client" className="md:col-span-2">
           <TextInput value={doc.refClient} onChange={(e) => setDoc({ ...doc, refClient: e.target.value })} />
+        </Field>
+        <Field label="Site d'intervention (base clients — site et adresse uniquement)" className="md:col-span-4">
+          <PartyAutocomplete
+            items={clients}
+            getName={(c) => c.societe}
+            value={doc.siteId}
+            onSelect={(id) => setDoc({ ...doc, siteId: id })}
+            placeholder="Rechercher un site — laisser vide si identique au client"
+          />
+          {doc.siteId && clients.find((c) => c.id === doc.siteId) && (
+            <div className="flex items-start justify-between gap-2 border border-slate-200 rounded-xl p-3 mt-2 bg-slate-50 text-sm text-slate-600">
+              <div>
+                <div className="font-medium text-slate-700">{clients.find((c) => c.id === doc.siteId).societe}</div>
+                {clients.find((c) => c.id === doc.siteId).adresse && <div>{clients.find((c) => c.id === doc.siteId).adresse}</div>}
+                <div>{clients.find((c) => c.id === doc.siteId).cp} {clients.find((c) => c.id === doc.siteId).ville}</div>
+                {clients.find((c) => c.id === doc.siteId).pays && <div>{clients.find((c) => c.id === doc.siteId).pays}</div>}
+              </div>
+              <button type="button" onClick={() => setDoc({ ...doc, siteId: "" })} className="text-slate-400 hover:text-red-600 p-1" title="Retirer le site"><X size={14} /></button>
+            </div>
+          )}
         </Field>
       </div>
 
@@ -3464,6 +3494,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
       statut: "À émettre",
       datePaiement: "",
       refDevisId: "",
+      siteId: "",
       refDevisNumero: "",
       type: "Complète",
       clientId: clients[0]?.id || "",
@@ -3558,6 +3589,26 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
         <Field label="Objet" className="md:col-span-2">
           <TextInput value={doc.objet} onChange={(e) => setDoc({ ...doc, objet: e.target.value })} />
         </Field>
+        <Field label="Site d'intervention (base clients — site et adresse uniquement)" className="md:col-span-4">
+          <PartyAutocomplete
+            items={clients}
+            getName={(c) => c.societe}
+            value={doc.siteId}
+            onSelect={(id) => setDoc({ ...doc, siteId: id })}
+            placeholder="Rechercher un site — laisser vide si identique au client"
+          />
+          {doc.siteId && clients.find((c) => c.id === doc.siteId) && (
+            <div className="flex items-start justify-between gap-2 border border-slate-200 rounded-xl p-3 mt-2 bg-slate-50 text-sm text-slate-600">
+              <div>
+                <div className="font-medium text-slate-700">{clients.find((c) => c.id === doc.siteId).societe}</div>
+                {clients.find((c) => c.id === doc.siteId).adresse && <div>{clients.find((c) => c.id === doc.siteId).adresse}</div>}
+                <div>{clients.find((c) => c.id === doc.siteId).cp} {clients.find((c) => c.id === doc.siteId).ville}</div>
+                {clients.find((c) => c.id === doc.siteId).pays && <div>{clients.find((c) => c.id === doc.siteId).pays}</div>}
+              </div>
+              <button type="button" onClick={() => setDoc({ ...doc, siteId: "" })} className="text-slate-400 hover:text-red-600 p-1" title="Retirer le site"><X size={14} /></button>
+            </div>
+          )}
+        </Field>
       </div>
       {doc.refDevisNumero && (
         <div className="text-xs text-slate-500 mb-4">
@@ -3647,6 +3698,7 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
       refDevisNumero: d.numero,
       type,
       clientId: d.clientId,
+      siteId: d.siteId || "",
       objet: d.objet,
       lignes,
       remiseGlobale: 0,
@@ -6241,6 +6293,10 @@ export default function App() {
       ? fournisseurs.find((f) => f.id === preview.doc.fournisseurId)
       : clients.find((c) => c.id === preview.doc.clientId)
     : null;
+  const previewSite =
+    preview && preview.type !== "commande" && preview.doc.siteId
+      ? clients.find((c) => c.id === preview.doc.siteId)
+      : null;
   const previewChantier =
     preview && preview.type === "commande" && preview.doc.chantierId
       ? clients.find((c) => c.id === preview.doc.chantierId)
@@ -6386,6 +6442,7 @@ export default function App() {
           doc={preview.doc}
           client={previewClient}
           chantier={previewChantier}
+          site={previewSite}
           settings={settings}
           cgv={cgv}
           gammeMaintenance={gammeMaintenance}
