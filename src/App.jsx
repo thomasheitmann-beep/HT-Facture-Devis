@@ -268,7 +268,7 @@ function buildSyntheseDevis(doc) {
   if (prestations.length) parts.push(plural(prestations.length, "ligne de prestation", "lignes de prestations"));
   const objet = String(doc.objet || "").trim();
   const intro =
-    `Cette synthèse décrit, sans indication de prix, le périmètre des travaux et des équipements chiffrés dans le présent devis` +
+    `Cette synthèse décrit le périmètre des travaux et des équipements chiffrés dans le présent devis` +
     `${objet ? ` (${objet})` : ""}. Elle reprend ${parts.join(" et ")}, tels qu'ils figurent dans les lignes de chiffrage ci-dessus.`;
   const postesDetail = postes.map((p) => ({
     titre: p.designation,
@@ -2806,16 +2806,6 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                     <td className="py-1.5 text-right">{l.remise ? `${l.remise}%` : "—"}</td>
                     <td className="py-1.5 text-right font-medium">{money(ht)}</td>
                   </tr>
-                  {l.sousLignes && l.sousLignes.length > 0 && l.sousLignes.map((sl, i) => (
-                    <tr key={i} className="border-b border-slate-50 text-slate-500">
-                      <td className="py-1 pl-3">{fullFrench(sl.designation)}</td>
-                      <td className="py-1">{sl.domaine || ""}</td>
-                      <td className="py-1 text-right">{sl.qte}</td>
-                      <td className="py-1 text-right">—</td>
-                      <td className="py-1 text-right">—</td>
-                      <td className="py-1 text-right">—</td>
-                    </tr>
-                  ))}
                   </React.Fragment>
                 );
               })}
