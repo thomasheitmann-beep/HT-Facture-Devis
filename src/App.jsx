@@ -2165,17 +2165,34 @@ function StatusBadge({ statut }) {
 /* Storage layer                                                          */
 /* ---------------------------------------------------------------------- */
 
+// Données communes à tous les comptes de l'entreprise (devis, factures,
+// commandes, fournisseurs, catalogue, paramètres, CGV, gamme) : stockées dans
+// l'espace partagé de Firestore, pas dans un espace propre à chaque compte.
+// Reprise de l'existant : si une donnée n'existe pas encore côté partagé, on
+// la recopie depuis l'ancien espace du compte connecté (migration unique).
 async function loadKey(key, fallback) {
   try {
-    const r = await window.storage.get(key, false);
-    return r && r.value ? JSON.parse(r.value) : fallback;
+    const r = await window.storage.get(key, true);
+    if (r && r.value) return JSON.parse(r.value);
   } catch (e) {
-    return fallback;
+    // Absent côté partagé : on tente la reprise. Toute autre erreur (réseau,
+    // droits) : on s'arrête sans rien écrire pour ne rien écraser.
+    if (!/not found/i.test(String(e && e.message))) return fallback;
   }
+  try {
+    const old = await window.storage.get(key, false);
+    if (old && old.value) {
+      try { await window.storage.set(key, old.value, true); } catch (e) { /* reprise différée */ }
+      return JSON.parse(old.value);
+    }
+  } catch (e) {
+    // rien dans l'ancien espace non plus
+  }
+  return fallback;
 }
 
 async function saveKey(key, value) {
-  await window.storage.set(key, JSON.stringify(value), false);
+  await window.storage.set(key, JSON.stringify(value), true);
 }
 
 /* ---------------------------------------------------------------------- */
