@@ -223,6 +223,66 @@ function parseMontant(s) {
   return Number(cleaned) || 0;
 }
 
+// Remplace les abréviations courantes des désignations d'équipements par
+// leur forme complète en français (ex. REC -> redresseur-chargeur).
+const ABBREVIATIONS = [
+  [/\bREC\b/g, "redresseur-chargeur"],
+  [/\bPFC\b/g, "batterie de compensation d'énergie réactive"],
+  [/\bUPS\b/g, "onduleur"],
+  [/\bTransfos\b/gi, "transformateurs"],
+  [/\bTransfo\b\.?/gi, "transformateur"],
+  [/\bDisjs\b/gi, "disjoncteurs"],
+  [/\bDisj\b\.?/gi, "disjoncteur"],
+  [/\bdébro\b\.?/gi, "débrochable"],
+  [/\bInters\b/gi, "interrupteurs"],
+  [/\bInter\b\.?/gi, "interrupteur"],
+  [/\binj\.\s*/gi, "injection "],
+  [/\bbatt\b\.?/gi, "batterie"],
+  [/\bTC\b/g, "transformateur de courant"],
+  [/\bTP\b/g, "transformateur de tension"],
+];
+
+function fullFrench(text) {
+  if (!text) return text;
+  const original = String(text);
+  const ah = original.trim().match(/^(\d+(?:[.,]\d+)?)\s*Ah$/i);
+  if (ah) return `Batterie de ${ah[1]} ampères-heures`;
+  let out = original;
+  ABBREVIATIONS.forEach(([re, rep]) => { out = out.replace(re, rep); });
+  out = out.replace(/\s{2,}/g, " ").trim();
+  if (/^[A-ZÀ-Ý]/.test(original) && out) out = out.charAt(0).toUpperCase() + out.slice(1);
+  return out;
+}
+
+// Synthèse sans prix des travaux et équipements du devis : reprend les postes
+// et les lignes de prestations des lignes de chiffrage (hors gamme de
+// maintenance).
+function buildSyntheseDevis(doc) {
+  const lignes = (doc.lignes || []).filter((l) => l.designation);
+  if (lignes.length === 0) return null;
+  const postes = lignes.filter((l) => l.sousLignes && l.sousLignes.length > 0);
+  const prestations = lignes.filter((l) => !(l.sousLignes && l.sousLignes.length > 0));
+  const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+  const parts = [];
+  if (postes.length) parts.push(plural(postes.length, "poste", "postes"));
+  if (prestations.length) parts.push(plural(prestations.length, "ligne de prestation", "lignes de prestations"));
+  const objet = String(doc.objet || "").trim();
+  const intro =
+    `Cette synthèse décrit, sans indication de prix, le périmètre des travaux et des équipements chiffrés dans le présent devis` +
+    `${objet ? ` (${objet})` : ""}. Elle reprend ${parts.join(" et ")}, tels qu'ils figurent dans les lignes de chiffrage ci-dessus.`;
+  const postesDetail = postes.map((p) => ({
+    titre: p.designation,
+    texte: `Ce poste comprend : ${p.sousLignes
+      .map((sl) => `${fullFrench(sl.designation)} (quantité : ${sl.qte})`)
+      .join(" ; ")}.`,
+  }));
+  const prestationsDetail = prestations.map((l) => {
+    const qte = Number(l.qte);
+    return `${l.designation}${qte > 0 ? ` (quantité : ${qte}${l.unite ? ` ${l.unite}` : ""})` : ""}`;
+  });
+  return { intro, postesDetail, prestationsDetail };
+}
+
 // Interprète la colonne "Niveau" du chiffrage (ex. "Niveau 1-4 (complet)",
 // "Niveau 1-2 (exploitant)", "Niveau 3-4 (HT Maintenance)", ou "—" si non
 // renseigné). En cas de format non reconnu ou absent, on inclut par défaut
@@ -325,7 +385,7 @@ function extractHTChiffrage(htmlDoc) {
       designation: poste,
       qte: 1,
       puHT: brut * ratio,
-      sousLignes: items.map((it) => ({ designation: it.designation, qte: it.qte, domaine: chiffrageDomaine(it.familleBrute) })),
+      sousLignes: items.map((it) => ({ designation: fullFrench(it.designation), qte: it.qte, domaine: chiffrageDomaine(it.familleBrute) })),
     };
   });
 
@@ -397,7 +457,7 @@ function extractFireProChiffrage(htmlDoc) {
         designation: loc.nom,
         qte: 1,
         puHT: brut * ratio,
-        sousLignes: loc.items.map((it) => ({ designation: it.designation, qte: it.qte })),
+        sousLignes: loc.items.map((it) => ({ designation: fullFrench(it.designation), qte: it.qte })),
       };
     });
 
@@ -2398,7 +2458,7 @@ function LinesEditor({ lignes, setLignes, catalog }) {
                         <div className="pl-2 text-[10px] uppercase tracking-wide text-slate-400 font-semibold pt-1">Équipements inclus (import chiffrage — sans prix individuel)</div>
                         {l.sousLignes.map((sl, i) => (
                           <div key={i} className="pl-2 flex items-center gap-1.5">
-                            <span>{sl.designation} (×{sl.qte})</span>
+                            <span>{fullFrench(sl.designation)} (×{sl.qte})</span>
                             {sl.domaine && (
                               <span className="inline-block px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 text-[10px] font-medium">{sl.domaine}</span>
                             )}
@@ -2579,6 +2639,18 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
   const partyEmail = client?.email || "";
   const docKind = isDevis ? "devis" : isCommande ? "commande" : "facture";
 
+  // Le navigateur propose le titre de la page comme nom de fichier lors de
+  // l'enregistrement en PDF : on y met le type, le numéro et le client (ou
+  // le fournisseur) pendant l'aperçu, puis on rétablit le titre d'origine.
+  useEffect(() => {
+    const previousTitle = document.title;
+    const partyName = isCommande ? client?.raisonSociale : client?.societe;
+    const kind = isDevis ? "Devis" : isCommande ? "Commande" : "Facture";
+    const raw = [`${kind} ${doc.numero || ""}`.trim(), partyName].filter(Boolean).join(" - ");
+    document.title = raw.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
+    return () => { document.title = previousTitle; };
+  }, [doc.numero, client?.societe, client?.raisonSociale, isDevis, isCommande]);
+
   return (
     <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-start justify-center overflow-y-auto py-2 sm:py-8 px-0 sm:px-4 no-print-parent">
       <style>{`
@@ -2650,7 +2722,6 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
               ) : (
                 <div className="text-xs text-slate-500">Échéance : {fmtDate(doc.echeance)}</div>
               )}
-              <div className="mt-2"><StatusBadge statut={doc.statut} /></div>
             </div>
           </div>
 
@@ -2737,7 +2808,7 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                   </tr>
                   {l.sousLignes && l.sousLignes.length > 0 && l.sousLignes.map((sl, i) => (
                     <tr key={i} className="border-b border-slate-50 text-slate-500">
-                      <td className="py-1 pl-3">{sl.designation}</td>
+                      <td className="py-1 pl-3">{fullFrench(sl.designation)}</td>
                       <td className="py-1">{sl.domaine || ""}</td>
                       <td className="py-1 text-right">{sl.qte}</td>
                       <td className="py-1 text-right">—</td>
@@ -2770,6 +2841,34 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
               </div>
             </div>
           </div>
+
+          {isDevis && (() => {
+            const synthese = buildSyntheseDevis(doc);
+            if (!synthese) return null;
+            return (
+              <div className="text-xs mb-4" style={{ breakInside: "avoid" }}>
+                <div className="font-semibold text-slate-700 mb-1">Annexe — Synthèse des travaux et des équipements</div>
+                <p className="text-slate-600 leading-relaxed mb-2">{synthese.intro}</p>
+                {synthese.postesDetail.map((p, i) => (
+                  <div key={i} className="mb-1.5">
+                    <div className="font-medium text-slate-700">{p.titre}</div>
+                    <p className="text-slate-600 leading-relaxed">{p.texte}</p>
+                  </div>
+                ))}
+                {synthese.prestationsDetail.length > 0 && (
+                  <div className="mb-1.5">
+                    <div className="font-medium text-slate-700">Lignes de prestations</div>
+                    <ul className="list-disc pl-4 text-slate-600 leading-relaxed">
+                      {synthese.prestationsDetail.map((t, i) => <li key={i}>{t}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {doc.syntheseTexte && (
+                  <p className="text-slate-600 leading-relaxed whitespace-pre-line mt-2">{doc.syntheseTexte}</p>
+                )}
+              </div>
+            );
+          })()}
 
           {isDevis ? (
             <>
@@ -3119,6 +3218,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       descriptifChecklist: [],
       famillesEquipement: [],
       famillesNiveaux: {},
+      syntheseTexte: "",
       lignes: [],
       remiseGlobale: 0,
       documentsManuel: "",
@@ -3417,6 +3517,15 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       </div>
 
       <div className="border border-slate-200 rounded-xl p-4 mt-4">
+        <div className="text-sm font-medium text-slate-700 mb-1">Synthèse des travaux et équipements (annexe imprimée)</div>
+        <p className="text-xs text-slate-400 mb-2">
+          La synthèse est générée automatiquement à partir des postes et des lignes de prestations du devis (sans prix, sans
+          gamme de maintenance). Vous pouvez ajouter ci-dessous un texte explicatif complémentaire.
+        </p>
+        <TextArea rows={3} value={doc.syntheseTexte || ""} onChange={(e) => setDoc({ ...doc, syntheseTexte: e.target.value })} placeholder="Texte explicatif complémentaire (optionnel)" />
+      </div>
+
+      <div className="border border-slate-200 rounded-xl p-4 mt-4">
         <div className="text-sm font-medium text-slate-700 mb-3">Documents à fournir par le client</div>
 
         <div className="text-xs text-slate-500 font-medium mb-1.5">Documents standards à demander</div>
@@ -3645,10 +3754,21 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
 /* Devis tab                                                              */
 /* ---------------------------------------------------------------------- */
 
-function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, settings, facturesList, saveFacturesList, openPreview }) {
+function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, settings, facturesList, saveFacturesList, openPreview, pendingAction, clearPendingAction }) {
   const [editing, setEditing] = useState(null); // null | 'new' | devis object
   const [query, setQuery] = useState("");
   const [converting, setConverting] = useState(null); // devis being converted
+
+  // Action demandée depuis le tableau de bord (modifier / facturer un devis)
+  useEffect(() => {
+    if (!pendingAction || pendingAction.tab !== "devis") return;
+    const d = devisList.find((x) => x.id === pendingAction.id);
+    if (d) {
+      if (pendingAction.action === "convert") setConverting(d);
+      else setEditing(d);
+    }
+    clearPendingAction();
+  }, [pendingAction]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clientName = (id) => clients.find((c) => c.id === id)?.societe || "—";
 
@@ -3835,9 +3955,17 @@ function ConvertModal({ devis, onCancel, onConfirm }) {
 /* Facture tab                                                            */
 /* ---------------------------------------------------------------------- */
 
-function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, catalog, settings, openPreview }) {
+function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, catalog, settings, openPreview, pendingAction, clearPendingAction }) {
   const [editing, setEditing] = useState(null);
   const [query, setQuery] = useState("");
+
+  // Action demandée depuis le tableau de bord (modifier une facture)
+  useEffect(() => {
+    if (!pendingAction || pendingAction.tab !== "factures") return;
+    const f = facturesList.find((x) => x.id === pendingAction.id);
+    if (f) setEditing(f);
+    clearPendingAction();
+  }, [pendingAction]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clientName = (id) => clients.find((c) => c.id === id)?.societe || "—";
 
@@ -4106,9 +4234,17 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
   );
 }
 
-function CommandesTab({ commandesList, saveCommandesList, fournisseurs, saveFournisseurs, clients, settings, openPreview }) {
+function CommandesTab({ commandesList, saveCommandesList, fournisseurs, saveFournisseurs, clients, settings, openPreview, pendingAction, clearPendingAction }) {
   const [editing, setEditing] = useState(null);
   const [query, setQuery] = useState("");
+
+  // Action demandée depuis le tableau de bord (modifier une commande)
+  useEffect(() => {
+    if (!pendingAction || pendingAction.tab !== "achats") return;
+    const d = commandesList.find((x) => x.id === pendingAction.id);
+    if (d) setEditing(d);
+    clearPendingAction();
+  }, [pendingAction]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fournisseurName = (id) => fournisseurs.find((f) => f.id === id)?.raisonSociale || "—";
   const chantierLabel = (d) => {
@@ -5580,7 +5716,17 @@ function KpiCard({ icon, label, value, sub, accent = "text-slate-800" }) {
   );
 }
 
-function DashboardTab({ devisList, facturesList, commandesList, clients, fournisseurs, settings, setTab, openPreview }) {
+function DashboardTab({ devisList, facturesList, saveFacturesList, commandesList, clients, fournisseurs, settings, setTab, openPreview, goToAction }) {
+  // Boutons d'action d'une ligne (mêmes actions que dans les listes détaillées)
+  const IconBtn = ({ title, onClick, disabled, hover = "hover:text-amber-600", children }) => (
+    <button type="button" title={title} onClick={onClick} disabled={disabled} className={`p-1.5 text-slate-400 ${hover} disabled:opacity-30 disabled:cursor-not-allowed`}>
+      {children}
+    </button>
+  );
+  const mailTo = (doc, party, kind) => { window.location.href = buildMailtoLink(doc, party, settings, kind); };
+  const markPaid = (f) =>
+    saveFacturesList(facturesList.map((x) => (x.id === f.id ? { ...x, statut: "Payée", datePaiement: x.datePaiement || today() } : x)));
+
   const clientName = (id) => clients.find((c) => c.id === id)?.societe || "—";
   const fournisseurName = (id) => fournisseurs.find((f) => f.id === id)?.raisonSociale || "—";
 
@@ -5662,9 +5808,17 @@ function DashboardTab({ devisList, facturesList, commandesList, clients, fournis
                     <div className="font-medium text-slate-800">{d.numero}</div>
                     <div className="text-xs text-slate-400">{clientName(d.clientId)}</div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge statut={d.statut} />
-                    <button onClick={() => openPreview("devis", d)} className="text-slate-400 hover:text-amber-600"><Printer size={14} /></button>
+                  <div className="flex items-center gap-0.5 flex-wrap justify-end">
+                    <span className="mr-1.5"><StatusBadge statut={d.statut} /></span>
+                    <IconBtn title="Convertir en facture" hover="hover:text-emerald-600" onClick={() => goToAction("devis", d.id, "convert")}><ArrowRightLeft size={15} /></IconBtn>
+                    <IconBtn
+                      title={clients.find((c) => c.id === d.clientId)?.email ? "Envoyer ce devis par e-mail" : "Aucun e-mail enregistré pour ce client"}
+                      hover="hover:text-sky-600"
+                      disabled={!clients.find((c) => c.id === d.clientId)?.email}
+                      onClick={() => mailTo(d, clients.find((c) => c.id === d.clientId), "devis")}
+                    ><Mail size={15} /></IconBtn>
+                    <IconBtn title="Aperçu / Imprimer" onClick={() => openPreview("devis", d)}><Printer size={15} /></IconBtn>
+                    <IconBtn title="Modifier" hover="hover:text-slate-700" onClick={() => goToAction("devis", d.id, "edit")}><Pencil size={15} /></IconBtn>
                   </div>
                 </li>
               ))}
@@ -5689,9 +5843,19 @@ function DashboardTab({ devisList, facturesList, commandesList, clients, fournis
                       <div className="font-medium text-slate-800">{f.numero}</div>
                       <div className="text-xs text-slate-400">{clientName(f.clientId)}</div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <StatusBadge statut={st} />
-                      <button onClick={() => openPreview("facture", f)} className="text-slate-400 hover:text-amber-600"><Printer size={14} /></button>
+                    <div className="flex items-center gap-0.5 flex-wrap justify-end">
+                      <span className="mr-1.5"><StatusBadge statut={st} /></span>
+                      {f.statut !== "Payée" && (
+                        <IconBtn title="Marquer comme payée" hover="hover:text-emerald-600" onClick={() => markPaid(f)}><CircleDollarSign size={15} /></IconBtn>
+                      )}
+                      <IconBtn
+                        title={clients.find((c) => c.id === f.clientId)?.email ? "Envoyer cette facture par e-mail" : "Aucun e-mail enregistré pour ce client"}
+                        hover="hover:text-sky-600"
+                        disabled={!clients.find((c) => c.id === f.clientId)?.email}
+                        onClick={() => mailTo(f, clients.find((c) => c.id === f.clientId), "facture")}
+                      ><Mail size={15} /></IconBtn>
+                      <IconBtn title="Aperçu / Imprimer" onClick={() => openPreview("facture", f)}><Printer size={15} /></IconBtn>
+                      <IconBtn title="Modifier" hover="hover:text-slate-700" onClick={() => goToAction("factures", f.id, "edit")}><Pencil size={15} /></IconBtn>
                     </div>
                   </li>
                 );
@@ -5715,9 +5879,16 @@ function DashboardTab({ devisList, facturesList, commandesList, clients, fournis
                     <div className="font-medium text-slate-800">{c.numero}</div>
                     <div className="text-xs text-slate-400">{fournisseurName(c.fournisseurId)}</div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge statut={c.statut} />
-                    <button onClick={() => openPreview("commande", c)} className="text-slate-400 hover:text-amber-600"><Printer size={14} /></button>
+                  <div className="flex items-center gap-0.5 flex-wrap justify-end">
+                    <span className="mr-1.5"><StatusBadge statut={c.statut} /></span>
+                    <IconBtn
+                      title={fournisseurs.find((f) => f.id === c.fournisseurId)?.email ? "Envoyer cette commande par e-mail" : "Aucun e-mail enregistré pour ce fournisseur"}
+                      hover="hover:text-sky-600"
+                      disabled={!fournisseurs.find((f) => f.id === c.fournisseurId)?.email}
+                      onClick={() => mailTo(c, fournisseurs.find((f) => f.id === c.fournisseurId), "commande")}
+                    ><Mail size={15} /></IconBtn>
+                    <IconBtn title="Aperçu / Imprimer" onClick={() => openPreview("commande", c)}><Printer size={15} /></IconBtn>
+                    <IconBtn title="Modifier" hover="hover:text-slate-700" onClick={() => goToAction("achats", c.id, "edit")}><Pencil size={15} /></IconBtn>
                   </div>
                 </li>
               ))}
@@ -5880,6 +6051,7 @@ const NAV = [
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("accueil");
+  const [pendingAction, setPendingAction] = useState(null); // { tab, id, action } demandé depuis le tableau de bord
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [clients, setClients] = useState([]);
   const [catalog, setCatalog] = useState(SEED_CATALOG);
@@ -6389,7 +6561,7 @@ export default function App() {
         )}
 
         {tab === "accueil" && (
-          <DashboardTab devisList={devisList} facturesList={facturesList} commandesList={commandesList} clients={clients} fournisseurs={fournisseurs} settings={settings} setTab={setTab} openPreview={openPreview} />
+          <DashboardTab devisList={devisList} facturesList={facturesList} saveFacturesList={saveFacturesList} commandesList={commandesList} clients={clients} fournisseurs={fournisseurs} settings={settings} setTab={setTab} openPreview={openPreview} goToAction={(tabKey, id, action) => { setPendingAction({ tab: tabKey, id, action }); setTab(tabKey); }} />
         )}
         {tab === "devis" && (
           <DevisTab
@@ -6397,6 +6569,7 @@ export default function App() {
             clients={clients} saveClients={saveClients} catalog={catalog} settings={settings}
             facturesList={facturesList} saveFacturesList={saveFacturesList}
             openPreview={openPreview}
+            pendingAction={pendingAction} clearPendingAction={() => setPendingAction(null)}
           />
         )}
         {tab === "factures" && (
@@ -6404,6 +6577,7 @@ export default function App() {
             facturesList={facturesList} saveFacturesList={saveFacturesList}
             clients={clients} saveClients={saveClients} catalog={catalog} settings={settings}
             openPreview={openPreview}
+            pendingAction={pendingAction} clearPendingAction={() => setPendingAction(null)}
           />
         )}
         {tab === "achats" && (
@@ -6411,6 +6585,7 @@ export default function App() {
             commandesList={commandesList} saveCommandesList={saveCommandesList}
             fournisseurs={fournisseurs} saveFournisseurs={saveFournisseurs} clients={clients} settings={settings}
             openPreview={openPreview}
+            pendingAction={pendingAction} clearPendingAction={() => setPendingAction(null)}
           />
         )}
         {tab === "clients" && (
