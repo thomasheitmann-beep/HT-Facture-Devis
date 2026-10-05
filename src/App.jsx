@@ -2665,6 +2665,7 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
           .no-print { display: none !important; }
           .cgv-annexe { page-break-before: always; break-before: page; }
           .gamme-annexe { page-break-before: always; break-before: page; }
+          .cover-page { min-height: 252mm !important; page-break-after: always; break-after: page; border: 0 !important; margin: 0 !important; padding-bottom: 0 !important; }
         }
       `}</style>
       <div className="bg-white w-full sm:max-w-3xl rounded-none sm:rounded-xl shadow-2xl print-area">
@@ -2691,6 +2692,30 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
         </div>
 
         <div className="p-4 sm:p-8">
+          {isDevis && doc.pageAccueil !== false && (
+            <div className="cover-page flex flex-col mb-8 pb-8 border-b border-dashed border-slate-200" style={{ minHeight: 520 }}>
+              <div>
+                {settings.logoDataUrl ? (
+                  <img src={settings.logoDataUrl} alt={settings.entreprise} className="h-14 max-w-[240px] object-contain" />
+                ) : (
+                  <div className="flex items-center gap-2 text-slate-900 font-bold text-2xl">
+                    <Zap size={24} className="text-amber-500" /> {settings.entreprise}
+                  </div>
+                )}
+                <p className="text-xs text-slate-500 mt-2">Maintenance industrielle • Expertise • Fiabilité</p>
+                <div className="w-12 h-[3px] bg-amber-500 mt-6" />
+              </div>
+              <div className="flex-1 flex flex-col justify-center py-10">
+                <div className="text-sm text-slate-500 mb-2">Devis n° {doc.numero}</div>
+                <div className="text-3xl font-medium text-slate-900 leading-tight mb-4">Proposition technique et commerciale</div>
+                {doc.objet && <div className="text-base text-slate-600 leading-relaxed">{doc.objet}</div>}
+              </div>
+              <div className="border-t border-slate-300 pt-4">
+                <div className="text-xs text-slate-500">Client</div>
+                <div className="text-base text-slate-900">{client?.societe || "—"}</div>
+              </div>
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
             <div>
               {settings.logoDataUrl ? (
@@ -3209,6 +3234,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       famillesEquipement: [],
       famillesNiveaux: {},
       syntheseTexte: "",
+      pageAccueil: true,
       lignes: [],
       remiseGlobale: 0,
       documentsManuel: "",
@@ -3505,6 +3531,16 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
           })}
         </div>
       </div>
+
+      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer border border-slate-200 rounded-xl p-4 mt-4">
+        <input
+          type="checkbox"
+          checked={doc.pageAccueil !== false}
+          onChange={(e) => setDoc({ ...doc, pageAccueil: e.target.checked })}
+          className="rounded border-slate-300"
+        />
+        Imprimer une page d'accueil (couverture avec le client) avant le devis
+      </label>
 
       <div className="border border-slate-200 rounded-xl p-4 mt-4">
         <div className="text-sm font-medium text-slate-700 mb-1">Synthèse des travaux et équipements (annexe imprimée)</div>
