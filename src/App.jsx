@@ -2665,7 +2665,7 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
           .no-print { display: none !important; }
           .cgv-annexe { page-break-before: always; break-before: page; }
           .gamme-annexe { page-break-before: always; break-before: page; }
-          .cover-page { min-height: 252mm !important; page-break-after: always; break-after: page; border: 0 !important; margin: 0 !important; padding-bottom: 0 !important; }
+          .cover-page { height: 215mm !important; min-height: 0 !important; overflow: hidden; page-break-after: always; break-after: page; break-inside: avoid; border: 0 !important; margin: 0 !important; padding-bottom: 0 !important; }
         }
       `}</style>
       <div className="bg-white w-full sm:max-w-3xl rounded-none sm:rounded-xl shadow-2xl print-area">
@@ -2917,8 +2917,9 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                 <div className="gamme-annexe text-xs bg-slate-50 rounded-lg p-3 mb-4">
                   <div className="font-semibold text-slate-700 mb-2">Gamme de maintenance associée aux équipements du présent devis</div>
                   <p className="text-slate-500 mb-2">
-                    Répartition indicative des opérations entre niveaux 1-2 (exploitant) et niveaux 3-4 (HT Maintenance),
-                    selon la norme NF X60-000 — le périmètre exact est ajusté lors du diagnostic initial.
+                    Répartition indicative des opérations entre surveillance et entretien courant d'une part, et contrôles,
+                    mesures et essais spécialisés d'autre part, selon la norme NF X60-000 — le périmètre exact est ajusté
+                    lors du diagnostic initial.
                   </p>
                   <div className="space-y-2.5">
                     {(doc.famillesEquipement || []).map((fam) => {
@@ -2931,7 +2932,7 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {flags.niveau12 && (
                               <div>
-                                <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Niveaux 1-2 — Exploitant</div>
+                                <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Surveillance et entretien courant</div>
                                 <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
                                   {g.niveau12.map((item, i) => <li key={i}>{item}</li>)}
                                 </ul>
@@ -2939,7 +2940,7 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                             )}
                             {flags.niveau34 && (
                               <div>
-                                <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Niveaux 3-4 — HT Maintenance</div>
+                                <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Contrôles, mesures et essais spécialisés</div>
                                 <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
                                   {g.niveau34.map((item, i) => <li key={i}>{item}</li>)}
                                 </ul>
@@ -3506,9 +3507,9 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
             const flags = doc.famillesNiveaux?.[fam];
             let niveauLabel = "";
             if (checked && flags) {
-              if (flags.niveau12 && flags.niveau34) niveauLabel = "niveaux 1-4";
-              else if (flags.niveau12) niveauLabel = "niveaux 1-2 uniquement";
-              else if (flags.niveau34) niveauLabel = "niveaux 3-4 uniquement";
+              if (flags.niveau12 && flags.niveau34) niveauLabel = "entretien courant et contrôles spécialisés";
+              else if (flags.niveau12) niveauLabel = "entretien courant uniquement";
+              else if (flags.niveau34) niveauLabel = "contrôles spécialisés uniquement";
             }
             return (
               <label key={fam} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -5403,7 +5404,7 @@ function GammeTab({ gammeMaintenance, saveGammeMaintenance }) {
               {["niveau12", "niveau34"].map((niveau) => (
                 <div key={niveau}>
                   <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1.5">
-                    {niveau === "niveau12" ? "Niveaux 1-2 — Exploitant" : "Niveaux 3-4 — HT Maintenance"}
+                    {niveau === "niveau12" ? "Surveillance et entretien courant" : "Contrôles, mesures et essais spécialisés"}
                   </div>
                   {editing ? (
                     <div className="space-y-1.5">
