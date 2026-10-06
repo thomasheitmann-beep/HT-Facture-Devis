@@ -2139,6 +2139,9 @@ const SEED_CLIENTS_IMPORT = [
 const DEVIS_CONDITIONS_DEFAUT =
   "Paiement selon les conditions indiquées ci-contre. Toute prestation supplémentaire fera l'objet d'un accord écrit. Le client garantit l'accès, la consignation et les conditions de sécurité du site. Les délais sont indicatifs sauf engagement écrit contraire.";
 
+const INTRO_ACCUEIL_DEFAUT =
+  "Suite à votre demande, veuillez trouver ci-jointe notre proposition commerciale.\nRestant à votre disposition pour toutes questions.";
+
 const DOCUMENTS_PRESETS = [
   "Schémas électriques des équipements concernés (cellules, relais, commandes)",
   "Notices constructeurs des équipements à intervenir",
@@ -2709,6 +2712,11 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                 <div className="text-sm text-slate-500 mb-2">Devis n° {doc.numero}</div>
                 <div className="text-3xl font-medium text-slate-900 leading-tight mb-4">Proposition technique et commerciale</div>
                 {doc.objet && <div className="text-base text-slate-600 leading-relaxed">{doc.objet}</div>}
+                {(typeof doc.introAccueil === "string" ? doc.introAccueil : INTRO_ACCUEIL_DEFAUT).trim() && (
+                  <p className="mt-10 text-sm text-slate-600 leading-relaxed whitespace-pre-line">
+                    {typeof doc.introAccueil === "string" ? doc.introAccueil : INTRO_ACCUEIL_DEFAUT}
+                  </p>
+                )}
               </div>
               <div className="border-t border-slate-300 pt-4">
                 <div className="text-xs text-slate-500">Client</div>
@@ -3236,6 +3244,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       famillesNiveaux: {},
       syntheseTexte: "",
       pageAccueil: true,
+      introAccueil: INTRO_ACCUEIL_DEFAUT,
       lignes: [],
       remiseGlobale: 0,
       documentsManuel: "",
@@ -3533,15 +3542,34 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer border border-slate-200 rounded-xl p-4 mt-4">
-        <input
-          type="checkbox"
-          checked={doc.pageAccueil !== false}
-          onChange={(e) => setDoc({ ...doc, pageAccueil: e.target.checked })}
-          className="rounded border-slate-300"
-        />
-        Imprimer une page d'accueil (couverture avec le client) avant le devis
-      </label>
+      <div className="border border-slate-200 rounded-xl p-4 mt-4">
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={doc.pageAccueil !== false}
+            onChange={(e) => setDoc({ ...doc, pageAccueil: e.target.checked })}
+            className="rounded border-slate-300"
+          />
+          Imprimer une page d'accueil (couverture avec le client) avant le devis
+        </label>
+        {doc.pageAccueil !== false && (
+          <div className="mt-3">
+            <div className="text-xs text-slate-500 font-medium mb-1">Texte d'introduction de la page d'accueil</div>
+            <TextArea
+              rows={3}
+              value={typeof doc.introAccueil === "string" ? doc.introAccueil : INTRO_ACCUEIL_DEFAUT}
+              onChange={(e) => setDoc({ ...doc, introAccueil: e.target.value })}
+            />
+            <button
+              type="button"
+              onClick={() => setDoc({ ...doc, introAccueil: INTRO_ACCUEIL_DEFAUT })}
+              className="text-xs text-amber-600 hover:underline mt-1"
+            >
+              Rétablir le texte par défaut
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="border border-slate-200 rounded-xl p-4 mt-4">
         <div className="text-sm font-medium text-slate-700 mb-1">Synthèse des travaux et équipements (annexe imprimée)</div>
