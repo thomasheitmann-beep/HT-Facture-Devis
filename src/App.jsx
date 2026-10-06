@@ -3556,14 +3556,15 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
           <div className="mt-3">
             <div className="text-xs text-slate-500 font-medium mb-1">Texte d'introduction de la page d'accueil</div>
             <TextArea
-              rows={3}
+              rows={4}
+              className="w-full"
               value={typeof doc.introAccueil === "string" ? doc.introAccueil : INTRO_ACCUEIL_DEFAUT}
               onChange={(e) => setDoc({ ...doc, introAccueil: e.target.value })}
             />
             <button
               type="button"
               onClick={() => setDoc({ ...doc, introAccueil: INTRO_ACCUEIL_DEFAUT })}
-              className="text-xs text-amber-600 hover:underline mt-1"
+              className="block text-xs text-amber-600 hover:underline mt-1"
             >
               Rétablir le texte par défaut
             </button>
@@ -3577,7 +3578,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
           La synthèse est générée automatiquement à partir des postes et des lignes de prestations du devis (sans prix, sans
           gamme de maintenance). Vous pouvez ajouter ci-dessous un texte explicatif complémentaire.
         </p>
-        <TextArea rows={3} value={doc.syntheseTexte || ""} onChange={(e) => setDoc({ ...doc, syntheseTexte: e.target.value })} placeholder="Texte explicatif complémentaire (optionnel)" />
+        <TextArea rows={5} className="w-full" value={doc.syntheseTexte || ""} onChange={(e) => setDoc({ ...doc, syntheseTexte: e.target.value })} placeholder="Texte explicatif complémentaire (optionnel)" />
       </div>
 
       <div className="border border-slate-200 rounded-xl p-4 mt-4">
