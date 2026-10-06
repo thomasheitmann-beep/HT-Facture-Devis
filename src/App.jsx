@@ -2529,7 +2529,6 @@ function splitIntoColumns(articles, n) {
 function buildMailtoLink(doc, party, settings, docKind) {
   const email = party?.email || "";
   const clean = (s) => String(s || "").replace(/[\u202f\u00a0]/g, " ").trim();
-  const eur = (n) => clean(money(n));
   const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trim()}…` : s);
 
   // Interlocuteur : on n'utilise le champ "contact" que s'il ressemble à un
@@ -2538,7 +2537,6 @@ function buildMailtoLink(doc, party, settings, docKind) {
   const looksLikeName = rawContact && rawContact.length <= 40 && !/[\d@]/.test(rawContact) && !rawContact.includes(",");
   const greeting = looksLikeName ? `Bonjour ${rawContact},` : "Bonjour,";
 
-  const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
   const objet = clean(doc.objet);
   const isDevis = docKind === "devis";
   const isCommande = docKind === "commande";
@@ -2556,12 +2554,10 @@ function buildMailtoLink(doc, party, settings, docKind) {
   if (isDevis) {
     subject = `Devis ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
     intro = `Suite à nos échanges, veuillez trouver ci-joint notre devis n° ${doc.numero}${objet ? ` relatif à : ${objet}` : ""}.`;
-    story = `Cette proposition a été établie à partir de notre échange et de vos besoins. Elle couvre l'ensemble des prestations détaillées dans le document joint, pour un montant de ${eur(totals.totalHT)} HT, soit ${eur(totals.ttc)} TTC${doc.validiteJours ? `, et reste valable jusqu'au ${fmtDate(addDays(doc.date, doc.validiteJours))}` : ""}. Si certains points méritent d'être précisés ou ajustés (périmètre, planning, accès au site), nous en discuterons volontiers ensemble.`;
+    story = `Cette proposition a été établie à partir de notre échange et de vos besoins. Elle couvre l'ensemble des prestations détaillées dans le document joint${doc.validiteJours ? ` et reste valable jusqu'au ${fmtDate(addDays(doc.date, doc.validiteJours))}` : ""}. Si certains points méritent d'être précisés ou ajustés (périmètre, planning, accès au site), nous en discuterons volontiers ensemble.`;
     kv("Référence", doc.numero);
     kv("Date", fmtDate(dateDoc));
     if (doc.refClient) kv("Votre référence", clean(doc.refClient));
-    kv("Montant HT", eur(totals.totalHT));
-    kv("Montant TTC", eur(totals.ttc));
     if (doc.validiteJours) kv("Validité", `${doc.validiteJours} jours (jusqu'au ${fmtDate(addDays(doc.date, doc.validiteJours))})`);
     closing = [
       "Pour donner suite, il vous suffit de nous retourner ce devis daté, signé et revêtu de votre cachet, avec la mention « Bon pour accord ».",
@@ -2569,24 +2565,20 @@ function buildMailtoLink(doc, party, settings, docKind) {
   } else if (isCommande) {
     subject = `Commande ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
     intro = `Veuillez trouver ci-joint notre bon de commande n° ${doc.numero}${objet ? ` (${objet})` : ""}.`;
-    story = `Cette commande porte sur les fournitures et prestations détaillées dans le document joint, pour un montant de ${eur(totals.totalHT)} HT (${eur(totals.ttc)} TTC). Si un point appelle une précision de votre côté (références, disponibilité, conditionnement), merci de nous le signaler rapidement.`;
+    story = `Cette commande porte sur les fournitures et prestations détaillées dans le document joint. Si un point appelle une précision de votre côté (références, disponibilité, conditionnement), merci de nous le signaler rapidement.`;
     kv("Référence", doc.numero);
     kv("Date", fmtDate(dateDoc));
-    kv("Montant HT", eur(totals.totalHT));
-    kv("Montant TTC", eur(totals.ttc));
     closing = ["Merci de nous confirmer la bonne réception de cette commande ainsi que le délai de livraison prévu."];
   } else {
     subject = `${isAcompte ? `Facture d'${String(doc.type).toLowerCase()}` : "Facture"} ${doc.numero}${objet ? ` – ${short(objet, 60)}` : ""} – ${settings.entreprise}`;
     intro = `Veuillez trouver ci-joint notre ${isAcompte ? `facture d'${String(doc.type).toLowerCase()}` : "facture"} n° ${doc.numero}${objet ? ` relative à : ${objet}` : ""}.`;
     story = doc.statut === "Payée"
       ? `Elle correspond aux prestations réalisées et ne nécessite plus aucune action de votre part.`
-      : `Cette facture correspond aux prestations réalisées. Le montant à régler s'élève à ${eur(totals.ttc)} TTC, avec une échéance au ${fmtDate(doc.echeance)}. `
+      : `Cette facture correspond aux prestations réalisées. Son règlement est attendu pour le ${fmtDate(doc.echeance)}. `
         + "Si un document complémentaire est nécessaire à son traitement (bon de commande, numéro d'engagement), nous vous le transmettons rapidement.";
     kv("Référence", doc.numero);
     if (doc.refDevisNumero) kv("Devis associé", doc.refDevisNumero);
     kv("Date d'émission", fmtDate(dateDoc));
-    kv("Montant HT", eur(totals.totalHT));
-    kv("Montant TTC", eur(totals.ttc));
     if (doc.statut !== "Payée") kv("Échéance", fmtDate(doc.echeance));
     if (doc.statut === "Payée") {
       closing = [
