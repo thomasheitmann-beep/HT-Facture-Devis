@@ -53,6 +53,27 @@ function computeLineHT(l) {
   return qte * pu * (1 - remise / 100);
 }
 
+// Régimes de TVA applicables à un document selon le client (France, client
+// assujetti de l'Union européenne, client hors Union européenne). Les
+// mentions sont indicatives : à faire valider par votre comptable.
+const REGIMES_TVA = {
+  normal: { label: "Taux normal (client établi en France)", mention: "" },
+  autoliquidation: {
+    label: "Autoliquidation (client assujetti établi dans l'Union européenne)",
+    mention: "Autoliquidation de la TVA : TVA due par le preneur (client assujetti établi dans un autre État membre de l'Union européenne).",
+  },
+  export: {
+    label: "Exonération (client établi hors Union européenne)",
+    mention: "Exonération de TVA : client établi hors de l'Union européenne.",
+  },
+};
+
+// Taux de TVA applicable à un devis ou une facture : 0 pour une
+// autoliquidation ou une exonération, sinon le taux par défaut des paramètres.
+function docTaux(doc, settings) {
+  return doc && (doc.regimeTva === "autoliquidation" || doc.regimeTva === "export") ? 0 : settings.tauxTVA;
+}
+
 function computeTotals(lignes = [], remiseGlobale = 0, tauxTVA = 0.2) {
   let sousTotal = 0;
   lignes.forEach((l) => {
@@ -2527,7 +2548,7 @@ function splitIntoColumns(articles, n) {
 // Limite des navigateurs : une pièce jointe ne peut pas être ajoutée
 // automatiquement — le message invite donc à joindre le PDF.
 function buildMailtoLink(doc, party, settings, docKind) {
-  const email = party?.email || "";
+  const email = (docKind === "facture" && party?.factEmail) || party?.email || "";
   const clean = (s) => String(s || "").replace(/[\u202f\u00a0]/g, " ").trim();
   const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trim()}…` : s);
 
@@ -2624,7 +2645,7 @@ function buildMailtoLink(doc, party, settings, docKind) {
 }
 
 function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeMaintenance, onClose }) {
-  const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
+  const totals = computeTotals(doc.lignes, doc.remiseGlobale, docTaux(doc, settings));
   const isDevis = type === "devis";
   const isCommande = type === "commande";
   const docLabel = isDevis ? "du devis" : isCommande ? "de la commande" : "de la facture";
@@ -2758,11 +2779,16 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
               <div className="text-slate-500">{client?.adresse}</div>
               <div className="text-slate-500">{client?.cp} {client?.ville}</div>
               {client?.pays && <div className="text-slate-500">{client.pays}</div>}
+              {client?.siren && <div className="text-slate-500">SIREN : {client.siren}</div>}
+              {client?.tvaIntra && <div className="text-slate-500">N° TVA intracommunautaire : {client.tvaIntra}</div>}
               <div className="text-slate-500">{client?.email}</div>
             </div>
             <div className="bg-slate-50 rounded-lg p-3">
               <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">Objet</div>
               <div className="text-slate-700">{doc.objet || "—"}</div>
+              {!isDevis && !isCommande && doc.refCommandeClient && <div className="text-slate-500 mt-1">Votre commande n° : {doc.refCommandeClient}</div>}
+              {!isDevis && !isCommande && doc.numeroEngagement && <div className="text-slate-500 mt-1">N° d'engagement : {doc.numeroEngagement}</div>}
+              {!isDevis && !isCommande && client?.clientPublic && client?.codeService && <div className="text-slate-500 mt-1">Code service : {client.codeService}</div>}
               {!isDevis && !isCommande && doc.refDevisNumero && (
                 <div className="text-slate-500 mt-1">Réf. devis : {doc.refDevisNumero}</div>
               )}
@@ -2778,6 +2804,15 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                 </div>
               )}
             </div>
+            {!isDevis && !isCommande && client?.factDifferente && (
+              <div className="bg-slate-50 rounded-lg p-3 sm:col-span-2">
+                <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">Adresse de facturation</div>
+                <div className="font-medium text-slate-800">{client.factRaisonSociale || client.societe}</div>
+                {client.factAdresse && <div className="text-slate-500">{client.factAdresse}</div>}
+                <div className="text-slate-500">{client.factCp} {client.factVille}</div>
+                {client.factPays && <div className="text-slate-500">{client.factPays}</div>}
+              </div>
+            )}
             {!isCommande && site && (
               <div className="bg-slate-50 rounded-lg p-3 sm:col-span-2">
                 <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">Site d'intervention</div>
@@ -2849,13 +2884,17 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                 <span>Total HT</span><span>{money(totals.totalHT)}</span>
               </div>
               <div className="flex justify-between text-slate-500">
-                <span>TVA ({(Number(settings.tauxTVA) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span>
+                <span>TVA ({(Number(docTaux(doc, settings)) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span>
               </div>
               <div className="flex justify-between text-slate-900 font-bold text-sm border-t border-slate-800 pt-1 mt-1">
                 <span>TOTAL TTC</span><span>{money(totals.ttc)}</span>
               </div>
             </div>
           </div>
+
+          {!isCommande && REGIMES_TVA[doc.regimeTva]?.mention && (
+            <div className="text-xs text-slate-600 mb-4">{REGIMES_TVA[doc.regimeTva].mention}</div>
+          )}
 
           {isDevis && (() => {
             const synthese = buildSyntheseDevis(doc);
@@ -2979,7 +3018,7 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
           ) : (
             <div className="text-xs bg-slate-50 rounded-lg p-3 mb-4 space-y-1">
               <div className="text-slate-500">
-                Paiement : {settings.delaiPaiement}. {settings.escompte}. En cas de retard, pénalités exigibles
+                Paiement : {client?.delaiPaiement || settings.delaiPaiement}. {settings.escompte}. En cas de retard, pénalités exigibles
                 sans rappel préalable au taux : {settings.tauxPenalites}. Indemnité forfaitaire de recouvrement :
                 {" "}{money(settings.indemniteRecouvrement)} par facture en retard.
               </div>
@@ -3223,6 +3262,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       objet: "Intervention de maintenance",
       refClient: "",
       siteId: "",
+      regimeTva: "normal",
       preambuleInclure: false,
       preambuleHoraire: HORAIRE_PRESETS[0],
       preambuleHoraireCustom: "",
@@ -3245,7 +3285,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
     }
   );
 
-  const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
+  const totals = computeTotals(doc.lignes, doc.remiseGlobale, docTaux(doc, settings));
 
   const [importingChiffrage, setImportingChiffrage] = useState(false);
   const chiffrageInputRef = useRef(null);
@@ -3349,7 +3389,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
             items={clients}
             getName={(c) => c.societe}
             value={doc.clientId}
-            onSelect={(id) => setDoc({ ...doc, clientId: id })}
+            onSelect={(id) => { const cl = clients.find((x) => x.id === id); setDoc({ ...doc, clientId: id, regimeTva: cl?.regimeTva || "normal" }); }}
             placeholder="Rechercher ou saisir un client…"
             onCreateNew={(name) => {
               const created = { id: uid(), code: `CLI-${String(clients.length + 1).padStart(4, "0")}`, societe: name, contact: "", adresse: "", cp: "", ville: "", pays: "", email: "", telephones: [] };
@@ -3368,6 +3408,11 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
         </Field>
         <Field label="Référence client" className="md:col-span-2">
           <TextInput value={doc.refClient} onChange={(e) => setDoc({ ...doc, refClient: e.target.value })} />
+        </Field>
+        <Field label="Régime de TVA" className="md:col-span-4">
+          <Select value={doc.regimeTva || "normal"} onChange={(e) => setDoc({ ...doc, regimeTva: e.target.value })}>
+            {Object.entries(REGIMES_TVA).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </Select>
         </Field>
         <Field label="Site d'intervention (base clients — site et adresse uniquement)" className="md:col-span-4">
           <PartyAutocomplete
@@ -3624,7 +3669,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
             </div>
           </Field>
           <div className="flex justify-between text-slate-700 font-medium"><span>Total HT</span><span>{money(totals.totalHT)}</span></div>
-          <div className="flex justify-between text-slate-500"><span>TVA ({(Number(settings.tauxTVA) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span></div>
+          <div className="flex justify-between text-slate-500"><span>TVA ({(Number(docTaux(doc, settings)) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span></div>
           <div className="flex justify-between text-slate-900 font-bold border-t border-slate-300 pt-1.5 mt-1.5"><span>TOTAL TTC</span><span>{money(totals.ttc)}</span></div>
         </div>
       </div>
@@ -3652,6 +3697,9 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
       datePaiement: "",
       refDevisId: "",
       siteId: "",
+      regimeTva: "normal",
+      refCommandeClient: "",
+      numeroEngagement: "",
       refDevisNumero: "",
       type: "Complète",
       clientId: clients[0]?.id || "",
@@ -3661,7 +3709,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
     }
   );
 
-  const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
+  const totals = computeTotals(doc.lignes, doc.remiseGlobale, docTaux(doc, settings));
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
@@ -3729,7 +3777,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
             items={clients}
             getName={(c) => c.societe}
             value={doc.clientId}
-            onSelect={(id) => setDoc({ ...doc, clientId: id })}
+            onSelect={(id) => { const cl = clients.find((x) => x.id === id); setDoc({ ...doc, clientId: id, regimeTva: cl?.regimeTva || "normal", echeance: addDays(doc.dateEmission, parseDelaiJours(cl?.delaiPaiement || settings.delaiPaiement)) }); }}
             placeholder="Rechercher ou saisir un client…"
             onCreateNew={(name) => {
               const created = { id: uid(), code: `CLI-${String(clients.length + 1).padStart(4, "0")}`, societe: name, contact: "", adresse: "", cp: "", ville: "", pays: "", email: "", telephones: [] };
@@ -3745,6 +3793,17 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
         </Field>
         <Field label="Objet" className="md:col-span-2">
           <TextInput value={doc.objet} onChange={(e) => setDoc({ ...doc, objet: e.target.value })} />
+        </Field>
+        <Field label="Régime de TVA" className="md:col-span-4">
+          <Select value={doc.regimeTva || "normal"} onChange={(e) => setDoc({ ...doc, regimeTva: e.target.value })}>
+            {Object.entries(REGIMES_TVA).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="N° de commande du client" className="md:col-span-2">
+          <TextInput value={doc.refCommandeClient || ""} onChange={(e) => setDoc({ ...doc, refCommandeClient: e.target.value })} />
+        </Field>
+        <Field label="N° d'engagement (clients publics)" className="md:col-span-2">
+          <TextInput value={doc.numeroEngagement || ""} onChange={(e) => setDoc({ ...doc, numeroEngagement: e.target.value })} />
         </Field>
         <Field label="Site d'intervention (base clients — site et adresse uniquement)" className="md:col-span-4">
           <PartyAutocomplete
@@ -3785,7 +3844,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
             </div>
           </Field>
           <div className="flex justify-between text-slate-700 font-medium"><span>Total HT</span><span>{money(totals.totalHT)}</span></div>
-          <div className="flex justify-between text-slate-500"><span>TVA ({(Number(settings.tauxTVA) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span></div>
+          <div className="flex justify-between text-slate-500"><span>TVA ({(Number(docTaux(doc, settings)) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span></div>
           <div className="flex justify-between text-slate-900 font-bold border-t border-slate-300 pt-1.5 mt-1.5"><span>TOTAL TTC</span><span>{money(totals.ttc)}</span></div>
         </div>
       </div>
@@ -3842,7 +3901,7 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
   };
 
   const doConvert = (d, type, pourcentage) => {
-    const devisTotals = computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA);
+    const devisTotals = computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings));
     let lignes;
     if (type === "Complète") {
       lignes = d.lignes.map((l) => ({ ...l, id: uid() }));
@@ -3852,7 +3911,7 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
     } else {
       const dejaFacture = facturesList
         .filter((f) => f.refDevisId === d.id)
-        .reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA).totalHT, 0);
+        .reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings)).totalHT, 0);
       const montantHT = Math.max(devisTotals.totalHT - dejaFacture, 0);
       lignes = [{ id: uid(), ref: "", designation: `Solde sur devis ${d.numero}`, unite: "Forfait", qte: 1, puHT: montantHT, remise: 0 }];
     }
@@ -3860,13 +3919,16 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
       id: uid(),
       numero: nextNumber(facturesList, settings.numPrefixFacture || "FAC", "numero", settings.numAgencePrefix, settings.numDebutAnneeFiscale),
       dateEmission: today(),
-      echeance: addDays(today(), parseDelaiJours(settings.delaiPaiement)),
+      echeance: addDays(today(), parseDelaiJours(clients.find((cl) => cl.id === d.clientId)?.delaiPaiement || settings.delaiPaiement)),
       statut: "À émettre",
       refDevisId: d.id,
       refDevisNumero: d.numero,
       type,
       clientId: d.clientId,
       siteId: d.siteId || "",
+      regimeTva: d.regimeTva || "normal",
+      refCommandeClient: d.refClient || "",
+      numeroEngagement: "",
       objet: d.objet,
       lignes,
       remiseGlobale: 0,
@@ -3922,7 +3984,7 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
           </thead>
           <tbody>
             {filtered.map((d) => {
-              const t = computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA);
+              const t = computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings));
               return (
                 <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-2.5 font-medium text-slate-800">{d.numero}</td>
@@ -4084,7 +4146,7 @@ function FacturesTab({ facturesList, saveFacturesList, clients, saveClients, cat
           </thead>
           <tbody>
             {filtered.map((f) => {
-              const t = computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA);
+              const t = computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings));
               const st = effectiveStatut(f);
               return (
                 <tr key={f.id} className="border-t border-slate-100 hover:bg-slate-50">
@@ -4157,7 +4219,7 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
   );
   const [linkChantier, setLinkChantier] = useState(Boolean(initial && (initial.chantierId || initial.chantierRepere)));
 
-  const totals = computeTotals(doc.lignes, doc.remiseGlobale, settings.tauxTVA);
+  const totals = computeTotals(doc.lignes, doc.remiseGlobale, docTaux(doc, settings));
 
   const toggleChantier = (checked) => {
     setLinkChantier(checked);
@@ -4269,7 +4331,7 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
             </div>
           </Field>
           <div className="flex justify-between text-slate-700 font-medium"><span>Total HT</span><span>{money(totals.totalHT)}</span></div>
-          <div className="flex justify-between text-slate-500"><span>TVA ({(Number(settings.tauxTVA) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span></div>
+          <div className="flex justify-between text-slate-500"><span>TVA ({(Number(docTaux(doc, settings)) * 100).toFixed(0)}%)</span><span>{money(totals.tva)}</span></div>
           <div className="flex justify-between text-slate-900 font-bold border-t border-slate-300 pt-1.5 mt-1.5"><span>TOTAL TTC</span><span>{money(totals.ttc)}</span></div>
         </div>
       </div>
@@ -4366,7 +4428,7 @@ function CommandesTab({ commandesList, saveCommandesList, fournisseurs, saveFour
           </thead>
           <tbody>
             {filtered.map((d) => {
-              const t = computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA);
+              const t = computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings));
               return (
                 <tr key={d.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-2.5 font-medium text-slate-800">{d.numero}</td>
@@ -4656,6 +4718,8 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
     id: uid(),
     code: `CLI-${String(clients.length + 1).padStart(3, "0")}`,
     societe: "", contact: "", adresse: "", cp: "", ville: "", pays: "", email: "", telephones: [],
+    factDifferente: false, factRaisonSociale: "", factAdresse: "", factCp: "", factVille: "", factPays: "", factEmail: "",
+    siren: "", tvaIntra: "", regimeTva: "normal", delaiPaiement: "", clientPublic: false, codeService: "", contacts: [],
   });
 
   const save = (c) => {
@@ -4841,6 +4905,75 @@ function ClientsTab({ clients, saveClients, devisList, facturesList, commandesLi
                 </button>
               </div>
             </Field>
+            <div className="md:col-span-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!editing.factDifferente}
+                  onChange={(e) => setEditing({ ...editing, factDifferente: e.target.checked })}
+                  className="rounded border-slate-300"
+                />
+                Facturer une autre entité ou une autre adresse (raison sociale et adresse de facturation distinctes)
+              </label>
+              {editing.factDifferente && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+                  <Field label="Raison sociale de facturation" className="md:col-span-4"><TextInput value={editing.factRaisonSociale || ""} onChange={(e) => setEditing({ ...editing, factRaisonSociale: e.target.value })} /></Field>
+                  <Field label="Adresse de facturation" className="md:col-span-4"><TextInput value={editing.factAdresse || ""} onChange={(e) => setEditing({ ...editing, factAdresse: e.target.value })} /></Field>
+                  <Field label="Code postal"><TextInput value={editing.factCp || ""} onChange={(e) => setEditing({ ...editing, factCp: e.target.value })} /></Field>
+                  <Field label="Ville"><TextInput value={editing.factVille || ""} onChange={(e) => setEditing({ ...editing, factVille: e.target.value })} /></Field>
+                  <Field label="Pays"><TextInput value={editing.factPays || ""} onChange={(e) => setEditing({ ...editing, factPays: e.target.value })} placeholder="France (par défaut si vide)" /></Field>
+                  <Field label="E-mail de facturation"><TextInput value={editing.factEmail || ""} onChange={(e) => setEditing({ ...editing, factEmail: e.target.value })} /></Field>
+                </div>
+              )}
+            </div>
+            <div className="md:col-span-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
+              <div className="text-sm font-medium text-slate-700 mb-3">Informations administratives et de facturation</div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <Field label="SIREN"><TextInput value={editing.siren || ""} onChange={(e) => setEditing({ ...editing, siren: e.target.value })} placeholder="9 chiffres" /></Field>
+                <Field label="N° TVA intracommunautaire"><TextInput value={editing.tvaIntra || ""} onChange={(e) => setEditing({ ...editing, tvaIntra: e.target.value })} /></Field>
+                <Field label="Régime de TVA" className="md:col-span-2">
+                  <Select value={editing.regimeTva || "normal"} onChange={(e) => setEditing({ ...editing, regimeTva: e.target.value })}>
+                    {Object.entries(REGIMES_TVA).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Délai de paiement propre à ce client" className="md:col-span-4">
+                  <TextInput value={editing.delaiPaiement || ""} onChange={(e) => setEditing({ ...editing, delaiPaiement: e.target.value })} placeholder="ex. 45 jours fin de mois — laisser vide pour le délai standard des paramètres" />
+                </Field>
+                <label className="md:col-span-4 flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={!!editing.clientPublic} onChange={(e) => setEditing({ ...editing, clientPublic: e.target.checked })} className="rounded border-slate-300" />
+                  Client public (hôpital, collectivité, administration…)
+                </label>
+                {editing.clientPublic && (
+                  <Field label="Code service (Chorus Pro)" className="md:col-span-4"><TextInput value={editing.codeService || ""} onChange={(e) => setEditing({ ...editing, codeService: e.target.value })} /></Field>
+                )}
+              </div>
+            </div>
+            <div className="md:col-span-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
+              <div className="text-sm font-medium text-slate-700 mb-2">Autres contacts (achats, technique, comptabilité…)</div>
+              <div className="space-y-2">
+                {(editing.contacts || []).map((ct, i) => {
+                  const upd = (patch) => {
+                    const list = [...editing.contacts];
+                    list[i] = { ...list[i], ...patch };
+                    setEditing({ ...editing, contacts: list });
+                  };
+                  return (
+                    <div key={i} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                      <TextInput className="md:col-span-3" value={ct.nom || ""} onChange={(e) => upd({ nom: e.target.value })} placeholder="Nom" />
+                      <Select className="md:col-span-2" value={ct.role || "Achats"} onChange={(e) => upd({ role: e.target.value })}>
+                        {["Achats", "Technique", "Comptabilité", "Direction", "Autre"].map((r) => <option key={r} value={r}>{r}</option>)}
+                      </Select>
+                      <TextInput className="md:col-span-3" value={ct.email || ""} onChange={(e) => upd({ email: e.target.value })} placeholder="E-mail" />
+                      <TextInput className="md:col-span-3" value={ct.telephone || ""} onChange={(e) => upd({ telephone: e.target.value })} placeholder="Téléphone" />
+                      <button type="button" onClick={() => setEditing({ ...editing, contacts: editing.contacts.filter((_, idx) => idx !== i) })} className="md:col-span-1 text-slate-400 hover:text-red-600 p-1"><Trash2 size={15} /></button>
+                    </div>
+                  );
+                })}
+                <button type="button" onClick={() => setEditing({ ...editing, contacts: [...(editing.contacts || []), { nom: "", role: "Achats", email: "", telephone: "" }] })} className="text-xs text-amber-600 hover:underline">
+                  + Ajouter un contact
+                </button>
+              </div>
+            </div>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <Btn variant="outline" onClick={() => setEditing(null)}>Annuler</Btn>
@@ -4906,9 +5039,9 @@ function ClientDossier({ client, devisList, facturesList, commandesList, setting
   const factures = facturesList.filter((f) => f.clientId === client.id);
   const commandes = commandesList.filter((c) => c.chantierId === client.id);
 
-  const totalDevisTTC = devis.reduce((s, d) => s + computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA).ttc, 0);
-  const totalFactureTTC = factures.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA).ttc, 0);
-  const totalEncaisse = factures.filter((f) => f.statut === "Payée").reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA).ttc, 0);
+  const totalDevisTTC = devis.reduce((s, d) => s + computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings)).ttc, 0);
+  const totalFactureTTC = factures.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings)).ttc, 0);
+  const totalEncaisse = factures.filter((f) => f.statut === "Payée").reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings)).ttc, 0);
 
   return (
     <div>
@@ -4922,6 +5055,34 @@ function ClientDossier({ client, devisList, facturesList, commandesList, setting
           {(client.cp || client.ville) && <div>{client.cp} {client.ville}</div>}
           {client.pays && <div>{client.pays}</div>}
           {client.email && <div>{client.email}</div>}
+          {client.factDifferente && (
+            <div className="pt-2 mt-2 border-t border-slate-100">
+              <div className="text-xs text-slate-400 uppercase tracking-wide">Facturation</div>
+              {client.factRaisonSociale && <div className="font-medium text-slate-700">{client.factRaisonSociale}</div>}
+              {client.factAdresse && <div>{client.factAdresse}</div>}
+              {(client.factCp || client.factVille) && <div>{client.factCp} {client.factVille}</div>}
+              {client.factPays && <div>{client.factPays}</div>}
+              {client.factEmail && <div>{client.factEmail}</div>}
+            </div>
+          )}
+          {(client.siren || client.tvaIntra || client.delaiPaiement || client.clientPublic || (client.regimeTva && client.regimeTva !== "normal")) && (
+            <div className="pt-2 mt-2 border-t border-slate-100">
+              <div className="text-xs text-slate-400 uppercase tracking-wide">Informations administratives</div>
+              {client.siren && <div>SIREN : {client.siren}</div>}
+              {client.tvaIntra && <div>N° TVA intracommunautaire : {client.tvaIntra}</div>}
+              {client.regimeTva && client.regimeTva !== "normal" && <div>TVA : {REGIMES_TVA[client.regimeTva]?.label}</div>}
+              {client.delaiPaiement && <div>Délai de paiement : {client.delaiPaiement}</div>}
+              {client.clientPublic && <div>Client public{client.codeService ? ` — code service : ${client.codeService}` : ""}</div>}
+            </div>
+          )}
+          {(client.contacts || []).length > 0 && (
+            <div className="pt-2 mt-2 border-t border-slate-100">
+              <div className="text-xs text-slate-400 uppercase tracking-wide">Autres contacts</div>
+              {client.contacts.map((ct, i) => (
+                <div key={i}>{ct.nom}{ct.role ? ` (${ct.role})` : ""}{ct.email ? ` — ${ct.email}` : ""}{ct.telephone ? ` — ${ct.telephone}` : ""}</div>
+              ))}
+            </div>
+          )}
           {(client.telephones || []).map((p, i) => (
             <div key={i}>{p.numero} {p.type ? `(${p.type})` : ""}</div>
           ))}
@@ -4944,7 +5105,7 @@ function ClientDossier({ client, devisList, facturesList, commandesList, setting
               <li key={d.id} className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 first:border-t-0 text-sm">
                 <div>
                   <div className="font-medium text-slate-800">{d.numero}</div>
-                  <div className="text-xs text-slate-400">{fmtDate(d.date)} — {money(computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA).ttc)}</div>
+                  <div className="text-xs text-slate-400">{fmtDate(d.date)} — {money(computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings)).ttc)}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge statut={d.statut} />
@@ -4966,7 +5127,7 @@ function ClientDossier({ client, devisList, facturesList, commandesList, setting
               <li key={f.id} className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 first:border-t-0 text-sm">
                 <div>
                   <div className="font-medium text-slate-800">{f.numero}{f.type && f.type !== "Complète" ? ` (${f.type})` : ""}</div>
-                  <div className="text-xs text-slate-400">{fmtDate(f.dateEmission)} — {money(computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA).ttc)}</div>
+                  <div className="text-xs text-slate-400">{fmtDate(f.dateEmission)} — {money(computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings)).ttc)}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge statut={f.statut} />
@@ -4988,7 +5149,7 @@ function ClientDossier({ client, devisList, facturesList, commandesList, setting
               <li key={c.id} className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 first:border-t-0 text-sm">
                 <div>
                   <div className="font-medium text-slate-800">{c.numero}</div>
-                  <div className="text-xs text-slate-400">{fmtDate(c.date)} — {money(computeTotals(c.lignes, c.remiseGlobale, settings.tauxTVA).ttc)}</div>
+                  <div className="text-xs text-slate-400">{fmtDate(c.date)} — {money(computeTotals(c.lignes, c.remiseGlobale, docTaux(c, settings)).ttc)}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge statut={c.statut} />
@@ -5780,19 +5941,19 @@ function DashboardTab({ devisList, facturesList, saveFacturesList, commandesList
 
   const stats = useMemo(() => {
     const tauxTVA = settings.tauxTVA;
-    const devisTotal = devisList.reduce((s, d) => s + computeTotals(d.lignes, d.remiseGlobale, tauxTVA).ttc, 0);
+    const devisTotal = devisList.reduce((s, d) => s + computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings)).ttc, 0);
     const acceptes = devisList.filter((d) => d.statut === "Accepté");
     const tauxConversion = devisList.length ? Math.round((acceptes.length / devisList.length) * 100) : 0;
 
     const facturesEnRetard = facturesList.filter((f) => f.statut !== "Payée" && f.echeance && f.echeance < today());
     const facturesPayees = facturesList.filter((f) => f.statut === "Payée");
-    const caEncaisse = facturesPayees.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, tauxTVA).ttc, 0);
+    const caEncaisse = facturesPayees.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings)).ttc, 0);
     const enAttente = facturesList.filter((f) => f.statut !== "Payée");
-    const montantEnAttente = enAttente.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, tauxTVA).ttc, 0);
-    const montantEnRetard = facturesEnRetard.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, tauxTVA).ttc, 0);
+    const montantEnAttente = enAttente.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings)).ttc, 0);
+    const montantEnRetard = facturesEnRetard.reduce((s, f) => s + computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings)).ttc, 0);
 
     const commandesEnCours = commandesList.filter((c) => !["Reçue", "Annulée"].includes(c.statut));
-    const montantEngage = commandesEnCours.reduce((s, c) => s + computeTotals(c.lignes, c.remiseGlobale, tauxTVA).ttc, 0);
+    const montantEngage = commandesEnCours.reduce((s, c) => s + computeTotals(c.lignes, c.remiseGlobale, docTaux(c, settings)).ttc, 0);
 
     const devisARelancer = devisList.filter(
       (d) => d.statut === "Envoyé" && daysSince(d.date) >= (Number(settings.relanceJours) || 7)
@@ -6216,22 +6377,22 @@ export default function App() {
     const devisRows = [
       ["Date", "N° devis", "Client", "Montant HT", "TVA %", "Montant TTC", "Statut"],
       ...devisList.map((d) => {
-        const t = computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA);
-        return [asDate(d.date), d.numero, clientName(d.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), d.statut];
+        const t = computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings));
+        return [asDate(d.date), d.numero, clientName(d.clientId), Number(t.totalHT.toFixed(2)), Number(docTaux(d, settings)) || 0, Number(t.ttc.toFixed(2)), d.statut];
       }),
     ];
     const facturesRows = [
       ["Date émission", "N° facture", "Client", "Montant HT", "TVA %", "Montant TTC", "Statut", "Date paiement"],
       ...facturesList.map((f) => {
-        const t = computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA);
-        return [asDate(f.dateEmission), f.numero, clientName(f.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), f.statut, asDate(f.datePaiement)];
+        const t = computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings));
+        return [asDate(f.dateEmission), f.numero, clientName(f.clientId), Number(t.totalHT.toFixed(2)), Number(docTaux(f, settings)) || 0, Number(t.ttc.toFixed(2)), f.statut, asDate(f.datePaiement)];
       }),
     ];
     const commandesRows = [
       ["Date", "N° commande", "Fournisseur", "Montant HT", "TVA %", "Montant TTC", "Statut"],
       ...commandesList.map((c) => {
-        const t = computeTotals(c.lignes, c.remiseGlobale, settings.tauxTVA);
-        return [asDate(c.date), c.numero, fournisseurName(c.fournisseurId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), c.statut];
+        const t = computeTotals(c.lignes, c.remiseGlobale, docTaux(c, settings));
+        return [asDate(c.date), c.numero, fournisseurName(c.fournisseurId), Number(t.totalHT.toFixed(2)), Number(docTaux(c, settings)) || 0, Number(t.ttc.toFixed(2)), c.statut];
       }),
     ];
 
@@ -6353,16 +6514,16 @@ export default function App() {
     }
 
     const devisRows = devisList.map((d) => {
-      const t = computeTotals(d.lignes, d.remiseGlobale, settings.tauxTVA);
-      return [asDate(d.date), d.numero, clientName(d.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), d.statut];
+      const t = computeTotals(d.lignes, d.remiseGlobale, docTaux(d, settings));
+      return [asDate(d.date), d.numero, clientName(d.clientId), Number(t.totalHT.toFixed(2)), Number(docTaux(d, settings)) || 0, Number(t.ttc.toFixed(2)), d.statut];
     });
     const facturesRows = facturesList.map((f) => {
-      const t = computeTotals(f.lignes, f.remiseGlobale, settings.tauxTVA);
-      return [asDate(f.dateEmission), f.numero, clientName(f.clientId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), f.statut, asDate(f.datePaiement)];
+      const t = computeTotals(f.lignes, f.remiseGlobale, docTaux(f, settings));
+      return [asDate(f.dateEmission), f.numero, clientName(f.clientId), Number(t.totalHT.toFixed(2)), Number(docTaux(f, settings)) || 0, Number(t.ttc.toFixed(2)), f.statut, asDate(f.datePaiement)];
     });
     const commandesRows = commandesList.map((c) => {
-      const t = computeTotals(c.lignes, c.remiseGlobale, settings.tauxTVA);
-      return [asDate(c.date), c.numero, fournisseurName(c.fournisseurId), Number(t.totalHT.toFixed(2)), Number(settings.tauxTVA) || 0, Number(t.ttc.toFixed(2)), c.statut];
+      const t = computeTotals(c.lignes, c.remiseGlobale, docTaux(c, settings));
+      return [asDate(c.date), c.numero, fournisseurName(c.fournisseurId), Number(t.totalHT.toFixed(2)), Number(docTaux(c, settings)) || 0, Number(t.ttc.toFixed(2)), c.statut];
     });
 
     buildInputSheet("Devis", ["Date", "N° devis", "Client", "Montant HT", "TVA %", "Montant TTC", "Statut"], devisRows, DEVIS_STATUTS, [12, 14, 26, 14, 9, 14, 14]);
