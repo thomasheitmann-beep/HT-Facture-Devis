@@ -2644,7 +2644,7 @@ function buildMailtoLink(doc, party, settings, docKind) {
   return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeMaintenance, onClose }) {
+function PrintableDoc({ type, doc, client, chantier, site, billing, settings, cgv, gammeMaintenance, onClose }) {
   const totals = computeTotals(doc.lignes, doc.remiseGlobale, docTaux(doc, settings));
   const isDevis = type === "devis";
   const isCommande = type === "commande";
@@ -2804,13 +2804,13 @@ function PrintableDoc({ type, doc, client, chantier, site, settings, cgv, gammeM
                 </div>
               )}
             </div>
-            {!isDevis && !isCommande && client?.factDifferente && (
+            {!isDevis && !isCommande && billing && (
               <div className="bg-slate-50 rounded-lg p-3 sm:col-span-2">
                 <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">Adresse de facturation</div>
-                <div className="font-medium text-slate-800">{client.factRaisonSociale || client.societe}</div>
-                {client.factAdresse && <div className="text-slate-500">{client.factAdresse}</div>}
-                <div className="text-slate-500">{client.factCp} {client.factVille}</div>
-                {client.factPays && <div className="text-slate-500">{client.factPays}</div>}
+                <div className="font-medium text-slate-800">{billing.raisonSociale || client?.societe}</div>
+                {billing.adresse && <div className="text-slate-500">{billing.adresse}</div>}
+                <div className="text-slate-500">{billing.cp} {billing.ville}</div>
+                {billing.pays && <div className="text-slate-500">{billing.pays}</div>}
               </div>
             )}
             {!isCommande && site && (
@@ -3700,6 +3700,9 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
       regimeTva: "normal",
       refCommandeClient: "",
       numeroEngagement: "",
+      factMode: "client",
+      factEntiteId: "",
+      factManuel: { raisonSociale: "", adresse: "", cp: "", ville: "", pays: "" },
       refDevisNumero: "",
       type: "Complète",
       clientId: clients[0]?.id || "",
@@ -3805,6 +3808,41 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
         <Field label="N° d'engagement (clients publics)" className="md:col-span-2">
           <TextInput value={doc.numeroEngagement || ""} onChange={(e) => setDoc({ ...doc, numeroEngagement: e.target.value })} />
         </Field>
+        <div className="md:col-span-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
+          <div className="text-sm font-medium text-slate-700 mb-2">Adresse de facturation</div>
+          <Select value={doc.factMode || "client"} onChange={(e) => setDoc({ ...doc, factMode: e.target.value })}>
+            <option value="client">Celle du client (selon sa fiche)</option>
+            <option value="base">Une autre entité de la base clients</option>
+            <option value="manuelle">Saisie manuelle pour cette facture</option>
+          </Select>
+          {(doc.factMode || "client") === "client" && (
+            <p className="text-xs text-slate-500 mt-2">
+              {clients.find((x) => x.id === doc.clientId)?.factDifferente
+                ? "La fiche de ce client prévoit une adresse de facturation distincte : elle sera imprimée."
+                : "Aucune adresse distincte : seule l'adresse du client sera imprimée. Choisissez une autre option si la facture doit être adressée ailleurs."}
+            </p>
+          )}
+          {doc.factMode === "base" && (
+            <div className="mt-2">
+              <PartyAutocomplete
+                items={clients}
+                getName={(x) => x.societe}
+                value={doc.factEntiteId}
+                onSelect={(id) => setDoc({ ...doc, factEntiteId: id })}
+                placeholder="Rechercher l'entité à facturer dans la base clients"
+              />
+            </div>
+          )}
+          {doc.factMode === "manuelle" && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+              <Field label="Raison sociale" className="md:col-span-4"><TextInput value={doc.factManuel?.raisonSociale || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, raisonSociale: e.target.value } })} /></Field>
+              <Field label="Adresse" className="md:col-span-4"><TextInput value={doc.factManuel?.adresse || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, adresse: e.target.value } })} /></Field>
+              <Field label="Code postal"><TextInput value={doc.factManuel?.cp || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, cp: e.target.value } })} /></Field>
+              <Field label="Ville"><TextInput value={doc.factManuel?.ville || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, ville: e.target.value } })} /></Field>
+              <Field label="Pays" className="md:col-span-2"><TextInput value={doc.factManuel?.pays || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, pays: e.target.value } })} placeholder="France (par défaut si vide)" /></Field>
+            </div>
+          )}
+        </div>
         <Field label="Site d'intervention (base clients — site et adresse uniquement)" className="md:col-span-4">
           <PartyAutocomplete
             items={clients}
@@ -6674,6 +6712,24 @@ export default function App() {
       ? fournisseurs.find((f) => f.id === preview.doc.fournisseurId)
       : clients.find((c) => c.id === preview.doc.clientId)
     : null;
+  // Adresse de facturation à imprimer sur une facture : autre entité de la
+  // base, saisie manuelle, ou adresse de facturation prévue sur la fiche client.
+  const previewBilling = (() => {
+    if (!preview || preview.type !== "facture") return null;
+    const d = preview.doc;
+    if (d.factMode === "base") {
+      const e = clients.find((x) => x.id === d.factEntiteId);
+      return e ? { raisonSociale: e.societe, adresse: e.adresse, cp: e.cp, ville: e.ville, pays: e.pays } : null;
+    }
+    if (d.factMode === "manuelle") {
+      const m = d.factManuel || {};
+      return m.raisonSociale || m.adresse ? m : null;
+    }
+    const cl = clients.find((x) => x.id === d.clientId);
+    return cl && cl.factDifferente
+      ? { raisonSociale: cl.factRaisonSociale || cl.societe, adresse: cl.factAdresse, cp: cl.factCp, ville: cl.factVille, pays: cl.factPays }
+      : null;
+  })();
   const previewSite =
     preview && preview.type !== "commande" && preview.doc.siteId
       ? clients.find((c) => c.id === preview.doc.siteId)
@@ -6827,6 +6883,7 @@ export default function App() {
           client={previewClient}
           chantier={previewChantier}
           site={previewSite}
+          billing={previewBilling}
           settings={settings}
           cgv={cgv}
           gammeMaintenance={gammeMaintenance}
