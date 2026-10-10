@@ -2958,9 +2958,9 @@ function PrintableDoc({ type, doc, client, chantier, site, billing, settings, cg
                   </div>
                 )}
                 <div className="grid grid-cols-3 gap-4 mt-4 text-slate-400">
-                  <div className="h-20 flex items-end">Nom et qualité du signataire :</div>
-                  <div className="h-20 flex items-end">Date :</div>
-                  <div className="h-20 flex items-end">Cachet et signature :</div>
+                  <div className="h-28 flex items-start">Nom et qualité du signataire :</div>
+                  <div className="h-28 flex items-start">Date :</div>
+                  <div className="h-28 flex items-start">Cachet et signature :</div>
                 </div>
               </div>
               {(doc.famillesEquipement || []).length > 0 && gammeMaintenance && (
