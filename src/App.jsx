@@ -2804,7 +2804,7 @@ function PrintableDoc({ type, doc, client, chantier, site, billing, settings, cg
                 </div>
               )}
             </div>
-            {!isDevis && !isCommande && billing && (
+            {!isCommande && billing && (!isDevis || doc.factAfficher !== false) && (
               <div className="bg-slate-50 rounded-lg p-3 sm:col-span-2">
                 <div className="text-slate-600 uppercase tracking-wide font-semibold mb-1">Adresse de facturation</div>
                 <div className="font-medium text-slate-800">{billing.raisonSociale || client?.societe}</div>
@@ -2946,6 +2946,17 @@ function PrintableDoc({ type, doc, client, chantier, site, billing, settings, cg
                   Générales de Vente {settings.entreprise}. Mention manuscrite recommandée : « Bon pour accord,
                   devis et CGV acceptés ».
                 </p>
+                {doc.factInvitation !== false && (
+                  <div className="mt-3 text-slate-600">
+                    <p>
+                      {billing && doc.factAfficher !== false
+                        ? "La facture sera adressée à l'adresse de facturation indiquée en en-tête du devis. Si une autre entité ou une autre adresse doit figurer sur la facture, merci de nous la préciser :"
+                        : "Si la facture doit être adressée à une entité ou à une adresse différente de celle du client, merci de nous la préciser :"}
+                    </p>
+                    <div className="border-b border-slate-300 h-6" />
+                    <div className="border-b border-slate-300 h-6" />
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-4 mt-4 text-slate-400">
                   <div className="h-20 flex items-end">Nom et qualité du signataire :</div>
                   <div className="h-20 flex items-end">Date :</div>
@@ -3250,6 +3261,65 @@ function PartyDetailsCard({ party, fields, onSave }) {
   );
 }
 
+// Choix de l'adresse de facturation d'un devis ou d'une facture : celle de
+// la fiche client, une autre entité de la base clients, ou une saisie manuelle.
+// Pour un devis, deux options : l'afficher sur le devis, et inviter le client
+// à préciser une adresse de facturation différente.
+function BillingAddressPicker({ doc, setDoc, clients, isDevis = false }) {
+  const mode = doc.factMode || "client";
+  const cl = clients.find((x) => x.id === doc.clientId);
+  const setManuel = (patch) => setDoc({ ...doc, factManuel: { ...(doc.factManuel || {}), ...patch } });
+  return (
+    <div className="md:col-span-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
+      <div className="text-sm font-medium text-slate-700 mb-2">Adresse de facturation</div>
+      <Select value={mode} onChange={(e) => setDoc({ ...doc, factMode: e.target.value })}>
+        <option value="client">Celle du client (selon sa fiche)</option>
+        <option value="base">Une autre entité de la base clients</option>
+        <option value="manuelle">Saisie manuelle pour {isDevis ? "ce devis" : "cette facture"}</option>
+      </Select>
+      {mode === "client" && (
+        <p className="text-xs text-slate-500 mt-2">
+          {cl?.factDifferente
+            ? "La fiche de ce client prévoit une adresse de facturation distincte : elle sera utilisée."
+            : "Aucune adresse distincte : seule l'adresse du client sera utilisée. Choisissez une autre option si la facture doit être adressée ailleurs."}
+        </p>
+      )}
+      {mode === "base" && (
+        <div className="mt-2">
+          <PartyAutocomplete
+            items={clients}
+            getName={(x) => x.societe}
+            value={doc.factEntiteId}
+            onSelect={(id) => setDoc({ ...doc, factEntiteId: id })}
+            placeholder="Rechercher l'entité à facturer dans la base clients"
+          />
+        </div>
+      )}
+      {mode === "manuelle" && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+          <Field label="Raison sociale" className="md:col-span-4"><TextInput value={doc.factManuel?.raisonSociale || ""} onChange={(e) => setManuel({ raisonSociale: e.target.value })} /></Field>
+          <Field label="Adresse" className="md:col-span-4"><TextInput value={doc.factManuel?.adresse || ""} onChange={(e) => setManuel({ adresse: e.target.value })} /></Field>
+          <Field label="Code postal"><TextInput value={doc.factManuel?.cp || ""} onChange={(e) => setManuel({ cp: e.target.value })} /></Field>
+          <Field label="Ville"><TextInput value={doc.factManuel?.ville || ""} onChange={(e) => setManuel({ ville: e.target.value })} /></Field>
+          <Field label="Pays" className="md:col-span-2"><TextInput value={doc.factManuel?.pays || ""} onChange={(e) => setManuel({ pays: e.target.value })} placeholder="France (par défaut si vide)" /></Field>
+        </div>
+      )}
+      {isDevis && (
+        <div className="mt-3 pt-3 border-t border-slate-200 space-y-1.5">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={doc.factAfficher !== false} onChange={(e) => setDoc({ ...doc, factAfficher: e.target.checked })} className="rounded border-slate-300" />
+            Afficher l'adresse de facturation sur le devis (si elle diffère de celle du client)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={doc.factInvitation !== false} onChange={(e) => setDoc({ ...doc, factInvitation: e.target.checked })} className="rounded border-slate-300" />
+            Inviter le client à préciser, sur le devis signé, une adresse de facturation différente
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onCancel, onConvert, saveClients, openPreview }) {
   const [doc, setDoc] = useState(
     initial || {
@@ -3263,6 +3333,11 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
       refClient: "",
       siteId: "",
       regimeTva: "normal",
+      factMode: "client",
+      factEntiteId: "",
+      factManuel: { raisonSociale: "", adresse: "", cp: "", ville: "", pays: "" },
+      factAfficher: true,
+      factInvitation: true,
       preambuleInclure: false,
       preambuleHoraire: HORAIRE_PRESETS[0],
       preambuleHoraireCustom: "",
@@ -3343,7 +3418,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
           {initial && (
             <>
               <button
-                onClick={() => openPreview("devis", initial)}
+                onClick={() => openPreview("devis", doc)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
                 title="Aperçu / Imprimer ce devis"
               >
@@ -3414,6 +3489,7 @@ function DevisForm({ initial, clients, catalog, devisList, settings, onSave, onC
             {Object.entries(REGIMES_TVA).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </Select>
         </Field>
+        <BillingAddressPicker doc={doc} setDoc={setDoc} clients={clients} isDevis />
         <Field label="Site d'intervention (base clients — site et adresse uniquement)" className="md:col-span-4">
           <PartyAutocomplete
             items={clients}
@@ -3725,7 +3801,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
           {initial && (
             <>
               <button
-                onClick={() => openPreview("facture", initial)}
+                onClick={() => openPreview("facture", doc)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
                 title="Aperçu / Imprimer cette facture"
               >
@@ -3808,41 +3884,7 @@ function FactureForm({ initial, clients, catalog, facturesList, settings, onSave
         <Field label="N° d'engagement (clients publics)" className="md:col-span-2">
           <TextInput value={doc.numeroEngagement || ""} onChange={(e) => setDoc({ ...doc, numeroEngagement: e.target.value })} />
         </Field>
-        <div className="md:col-span-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
-          <div className="text-sm font-medium text-slate-700 mb-2">Adresse de facturation</div>
-          <Select value={doc.factMode || "client"} onChange={(e) => setDoc({ ...doc, factMode: e.target.value })}>
-            <option value="client">Celle du client (selon sa fiche)</option>
-            <option value="base">Une autre entité de la base clients</option>
-            <option value="manuelle">Saisie manuelle pour cette facture</option>
-          </Select>
-          {(doc.factMode || "client") === "client" && (
-            <p className="text-xs text-slate-500 mt-2">
-              {clients.find((x) => x.id === doc.clientId)?.factDifferente
-                ? "La fiche de ce client prévoit une adresse de facturation distincte : elle sera imprimée."
-                : "Aucune adresse distincte : seule l'adresse du client sera imprimée. Choisissez une autre option si la facture doit être adressée ailleurs."}
-            </p>
-          )}
-          {doc.factMode === "base" && (
-            <div className="mt-2">
-              <PartyAutocomplete
-                items={clients}
-                getName={(x) => x.societe}
-                value={doc.factEntiteId}
-                onSelect={(id) => setDoc({ ...doc, factEntiteId: id })}
-                placeholder="Rechercher l'entité à facturer dans la base clients"
-              />
-            </div>
-          )}
-          {doc.factMode === "manuelle" && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
-              <Field label="Raison sociale" className="md:col-span-4"><TextInput value={doc.factManuel?.raisonSociale || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, raisonSociale: e.target.value } })} /></Field>
-              <Field label="Adresse" className="md:col-span-4"><TextInput value={doc.factManuel?.adresse || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, adresse: e.target.value } })} /></Field>
-              <Field label="Code postal"><TextInput value={doc.factManuel?.cp || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, cp: e.target.value } })} /></Field>
-              <Field label="Ville"><TextInput value={doc.factManuel?.ville || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, ville: e.target.value } })} /></Field>
-              <Field label="Pays" className="md:col-span-2"><TextInput value={doc.factManuel?.pays || ""} onChange={(e) => setDoc({ ...doc, factManuel: { ...doc.factManuel, pays: e.target.value } })} placeholder="France (par défaut si vide)" /></Field>
-            </div>
-          )}
-        </div>
+        <BillingAddressPicker doc={doc} setDoc={setDoc} clients={clients} />
         <Field label="Site d'intervention (base clients — site et adresse uniquement)" className="md:col-span-4">
           <PartyAutocomplete
             items={clients}
@@ -3965,6 +4007,9 @@ function DevisTab({ devisList, saveDevisList, clients, saveClients, catalog, set
       clientId: d.clientId,
       siteId: d.siteId || "",
       regimeTva: d.regimeTva || "normal",
+      factMode: d.factMode || "client",
+      factEntiteId: d.factEntiteId || "",
+      factManuel: d.factManuel || { raisonSociale: "", adresse: "", cp: "", ville: "", pays: "" },
       refCommandeClient: d.refClient || "",
       numeroEngagement: "",
       objet: d.objet,
@@ -4275,7 +4320,7 @@ function CommandeForm({ initial, fournisseurs, clients, commandesList, settings,
           {initial && (
             <>
               <button
-                onClick={() => openPreview("commande", initial)}
+                onClick={() => openPreview("commande", doc)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
                 title="Aperçu / Imprimer cette commande"
               >
@@ -6715,7 +6760,7 @@ export default function App() {
   // Adresse de facturation à imprimer sur une facture : autre entité de la
   // base, saisie manuelle, ou adresse de facturation prévue sur la fiche client.
   const previewBilling = (() => {
-    if (!preview || preview.type !== "facture") return null;
+    if (!preview || preview.type === "commande") return null;
     const d = preview.doc;
     if (d.factMode === "base") {
       const e = clients.find((x) => x.id === d.factEntiteId);
