@@ -2398,23 +2398,38 @@ function StatusBadge({ statut }) {
 // l'espace partagé de Firestore, pas dans un espace propre à chaque compte.
 // Reprise de l'existant : si une donnée n'existe pas encore côté partagé, on
 // la recopie depuis l'ancien espace du compte connecté (migration unique).
+// Attend une réponse au plus `ms` millisecondes : évite de rester indéfiniment
+// sur l'écran de chargement quand la base ne répond pas.
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} : pas de réponse de la base après ${Math.round(ms / 1000)} s`)), ms);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (err) => { clearTimeout(t); reject(err); }
+    );
+  });
+}
+
+const isNotFound = (e) => /not found/i.test(String((e && e.message) || e));
+
+// Lecture d'une donnée. Seule l'absence de la donnée donne la valeur par défaut :
+// toute autre erreur (réseau, droits, quota, délai dépassé) est remontée, pour ne
+// jamais ouvrir l'application avec des données vides qui écraseraient les vraies.
 async function loadKey(key, fallback) {
   try {
-    const r = await window.storage.get(key, true);
+    const r = await withTimeout(window.storage.get(key, true), 15000, `Lecture « ${key} »`);
     if (r && r.value) return JSON.parse(r.value);
   } catch (e) {
-    // Absent côté partagé : on tente la reprise. Toute autre erreur (réseau,
-    // droits) : on s'arrête sans rien écrire pour ne rien écraser.
-    if (!/not found/i.test(String(e && e.message))) return fallback;
+    if (!isNotFound(e)) throw e;
   }
   try {
-    const old = await window.storage.get(key, false);
+    const old = await withTimeout(window.storage.get(key, false), 15000, `Lecture « ${key} » (ancien espace)`);
     if (old && old.value) {
       try { await window.storage.set(key, old.value, true); } catch (e) { /* reprise différée */ }
       return JSON.parse(old.value);
     }
   } catch (e) {
-    // rien dans l'ancien espace non plus
+    if (!isNotFound(e)) throw e;
   }
   return fallback;
 }
@@ -2434,7 +2449,7 @@ async function saveKey(key, value) {
 const CONTACTS_COLLECTION = "contacts-ht-maintenance";
 
 async function loadContactsShared() {
-  const snap = await getDocs(collection(db, CONTACTS_COLLECTION));
+  const snap = await withTimeout(getDocs(collection(db, CONTACTS_COLLECTION)), 30000, "Lecture des contacts partagés");
   const list = [];
   snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
   return list;
@@ -2449,8 +2464,14 @@ async function syncContactsToShared(newClients, previousClients) {
   const toDelete = [...prevIds].filter((id) => !newIds.has(id));
 
   const ops = [];
+  const prevById = new Map((previousClients || []).map((p) => [p.id, p]));
   newClients.forEach((c) => {
     const { id, ...rest } = c;
+    const prev = prevById.get(id);
+    if (prev) {
+      const { id: _ignore, ...prevRest } = prev;
+      if (JSON.stringify(prevRest) === JSON.stringify(rest)) return; // inchangé : aucune écriture
+    }
     ops.push({ type: "set", id, data: rest });
   });
   toDelete.forEach((id) => ops.push({ type: "delete", id }));
@@ -6499,6 +6520,9 @@ const NAV = [
 
 export default function App() {
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [contactsError, setContactsError] = useState("");
   const [tab, setTab] = useState("accueil");
   const [pendingAction, setPendingAction] = useState(null); // { tab, id, action } demandé depuis le tableau de bord
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -6515,6 +6539,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      try {
       const [s, legacyClients, cat, d, f, four, cda, cgvData, gammeData] = await Promise.all([
         loadKey("settings", DEFAULT_SETTINGS),
         loadKey("clients", []),
@@ -6540,8 +6565,12 @@ export default function App() {
         } else {
           sharedClients = shared;
         }
+        setContactsError("");
       } catch (e) {
+        // Base de contacts indisponible : on affiche les contacts de l'ancien stockage, sans
+        // autoriser leur modification (pour ne pas écraser la base partagée).
         sharedClients = legacyClients;
+        setContactsError(String((e && e.message) || e));
       }
 
       setSettings(s);
@@ -6562,8 +6591,12 @@ export default function App() {
       const gammeStockee = JSON.stringify(gammeData);
       setGammeMaintenance(gammeStockee === gammeV1 || gammeStockee === gammeV1AvantRelais ? GAMME_MAINTENANCE_DEFAULT : gammeData);
       setLoading(false);
+      } catch (e) {
+        setLoadError(String((e && e.message) || e));
+        setLoading(false);
+      }
     })();
-  }, []);
+  }, [reloadKey]);
 
   const persist = useCallback((key, setter) => async (value) => {
     setter(value);
@@ -6576,6 +6609,10 @@ export default function App() {
 
   const saveSettings = persist("settings", setSettings);
   const saveClients = async (newClients) => {
+    if (contactsError) {
+      setSaveError("Base de contacts partagée indisponible : la modification des contacts est désactivée pour le moment.");
+      return;
+    }
     const previous = clients;
     setClients(newClients);
     try {
@@ -6917,6 +6954,33 @@ export default function App() {
     );
   }
 
+  if (loadError) {
+    const quota = /quota|exhaust|resource/i.test(loadError);
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className="max-w-lg w-full bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-2 text-red-700 font-semibold mb-2">
+            <AlertTriangle size={18} /> Impossible de charger les données
+          </div>
+          <p className="text-sm text-slate-600 mb-3">
+            L'application ne s'ouvre pas volontairement tant que la base ne répond pas, pour ne pas afficher des données vides
+            qui pourraient écraser vos devis et factures.
+          </p>
+          <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2 mb-3 break-words">{loadError}</p>
+          <ul className="text-xs text-slate-500 list-disc pl-4 space-y-1 mb-4">
+            <li>Vérifiez votre connexion internet, puis réessayez.</li>
+            {quota && <li>Le message évoque un quota : le plafond gratuit quotidien de Firebase est peut-être atteint (console Firebase → Firestore → Utilisation). Il se réinitialise chaque jour.</li>}
+            <li>Si le problème persiste, déconnectez-vous puis reconnectez-vous.</li>
+          </ul>
+          <div className="flex gap-2">
+            <Btn variant="primary" onClick={() => { setLoadError(""); setLoading(true); setReloadKey((k) => k + 1); }}>Réessayer</Btn>
+            <Btn variant="outline" onClick={() => signOut(auth)}>Se déconnecter</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const previewClient = preview
     ? preview.type === "commande"
       ? fournisseurs.find((f) => f.id === preview.doc.fournisseurId)
@@ -7012,6 +7076,12 @@ export default function App() {
       </nav>
 
       <main className="flex-1 min-w-0 p-4 md:p-6 max-w-6xl pb-24 md:pb-6">
+        {contactsError && (
+          <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+            <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+            <span>Base de contacts partagée indisponible ({contactsError}). Les contacts affichés proviennent de l'ancien stockage et ne sont pas modifiables pour le moment. Rechargez la page pour réessayer.</span>
+          </div>
+        )}
         <div className="mb-4 no-print">
           <GlobalSearch
             devisList={devisList} facturesList={facturesList} commandesList={commandesList}
