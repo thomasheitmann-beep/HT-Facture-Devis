@@ -5830,8 +5830,24 @@ function GammeTab({ gammeMaintenance, saveGammeMaintenance }) {
 
   const data = editing ? form : gammeMaintenance;
 
+  // La gamme enregistrée diffère de la version détaillée par défaut (gamme personnalisée ou ancienne version).
+  const estVersionDetaillee = JSON.stringify(gammeMaintenance) === JSON.stringify(GAMME_MAINTENANCE_DEFAULT);
+  const passerVersionDetaillee = () => {
+    if (!confirm("Remplacer votre gamme actuelle par la version détaillée ? Vos modifications éventuelles de la gamme seront perdues.")) return;
+    saveGammeMaintenance(GAMME_MAINTENANCE_DEFAULT);
+  };
+
   return (
     <div>
+      {!editing && !estVersionDetaillee && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm text-slate-700 bg-sky-50 border border-sky-200 rounded-lg p-3 mb-4">
+          <span>
+            Une <strong>version détaillée</strong> de la gamme est disponible (points plus précis, mesures d'isolement et thermographie « en option »).
+            La gamme affichée ci-dessous est celle que vous avez enregistrée précédemment.
+          </span>
+          <Btn variant="primary" onClick={passerVersionDetaillee}>Passer à la version détaillée</Btn>
+        </div>
+      )}
       <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
         <AlertTriangle size={15} className="shrink-0 mt-0.5" />
         <span>Contenu indicatif par famille d'équipement (NF X60-000) — le périmètre exact (niveau, périodicité) se définit lors du diagnostic initial de chaque installation. Cette gamme s'ajoute automatiquement à l'impression d'un devis dont les familles correspondantes sont cochées.</span>
