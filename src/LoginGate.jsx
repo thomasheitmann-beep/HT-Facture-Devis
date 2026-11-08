@@ -12,16 +12,43 @@ const ERROR_MESSAGES = {
   "auth/network-request-failed": "Connexion impossible — vérifiez votre réseau.",
 };
 
+// Supprime le cache local de Firebase (IndexedDB) puis recharge la page. Répare les blocages
+// d'origine locale (cache corrompu, onglets concurrents, Safari). Avec includeAuth, la session de
+// connexion est aussi effacée : il faudra se reconnecter.
+async function clearLocalFirebaseCache(includeAuth) {
+  try {
+    const dbs = indexedDB.databases ? await indexedDB.databases() : [];
+    const names = dbs
+      .map((d) => d.name)
+      .filter((n) => n && (n.startsWith("firestore/") || (includeAuth && n === "firebaseLocalStorageDb")));
+    await Promise.all(
+      names.map(
+        (n) =>
+          new Promise((resolve) => {
+            const r = indexedDB.deleteDatabase(n);
+            r.onsuccess = r.onerror = r.onblocked = () => resolve();
+          })
+      )
+    );
+  } catch (e) {
+    /* on recharge quand même */
+  }
+  window.location.reload();
+}
+
 export default function LoginGate({ children }) {
   const [user, setUser] = useState(undefined); // undefined = chargement initial, null = déconnecté
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
-    return unsubscribe;
+    // Si l'état de connexion n'arrive pas (cache local bloqué, onglets concurrents), on le signale.
+    const timer = setTimeout(() => setSlow(true), 10000);
+    return () => { clearTimeout(timer); unsubscribe(); };
   }, []);
 
   const handleSubmit = async (e) => {
@@ -39,8 +66,20 @@ export default function LoginGate({ children }) {
 
   if (user === undefined) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400 text-sm">
-        Chargement…
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-slate-50 text-slate-400 text-sm px-4 text-center">
+        <div>Chargement…</div>
+        {slow && (
+          <div className="max-w-sm text-xs text-slate-500">
+            <p className="mb-2">La connexion tarde plus que d'habitude. Fermez les autres onglets de l'application, rechargez la page, ou réparez le cache local (vous devrez vous reconnecter).</p>
+            <button
+              type="button"
+              onClick={() => clearLocalFirebaseCache(true)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-slate-700 hover:bg-white"
+            >
+              Réparer le cache local et recharger
+            </button>
+          </div>
+        )}
       </div>
     );
   }

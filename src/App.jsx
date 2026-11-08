@@ -2410,6 +2410,30 @@ function withTimeout(promise, ms, label) {
   });
 }
 
+// Supprime le cache local de Firebase (IndexedDB) puis recharge la page. Répare les blocages
+// d'origine locale (cache corrompu, onglets concurrents, Safari). Avec includeAuth, la session de
+// connexion est aussi effacée : il faudra se reconnecter.
+async function clearLocalFirebaseCache(includeAuth) {
+  try {
+    const dbs = indexedDB.databases ? await indexedDB.databases() : [];
+    const names = dbs
+      .map((d) => d.name)
+      .filter((n) => n && (n.startsWith("firestore/") || (includeAuth && n === "firebaseLocalStorageDb")));
+    await Promise.all(
+      names.map(
+        (n) =>
+          new Promise((resolve) => {
+            const r = indexedDB.deleteDatabase(n);
+            r.onsuccess = r.onerror = r.onblocked = () => resolve();
+          })
+      )
+    );
+  } catch (e) {
+    /* on recharge quand même */
+  }
+  window.location.reload();
+}
+
 const isNotFound = (e) => /not found/i.test(String((e && e.message) || e));
 
 // Lecture d'une donnée. Seule l'absence de la donnée donne la valeur par défaut :
@@ -6970,10 +6994,12 @@ export default function App() {
           <ul className="text-xs text-slate-500 list-disc pl-4 space-y-1 mb-4">
             <li>Vérifiez votre connexion internet, puis réessayez.</li>
             {quota && <li>Le message évoque un quota : le plafond gratuit quotidien de Firebase est peut-être atteint (console Firebase → Firestore → Utilisation). Il se réinitialise chaque jour.</li>}
+            <li>Fermez les autres onglets de l'application, puis essayez « Vider le cache local » (vos données en ligne ne sont pas touchées).</li>
             <li>Si le problème persiste, déconnectez-vous puis reconnectez-vous.</li>
           </ul>
           <div className="flex gap-2">
             <Btn variant="primary" onClick={() => { setLoadError(""); setLoading(true); setReloadKey((k) => k + 1); }}>Réessayer</Btn>
+            <Btn variant="outline" onClick={() => clearLocalFirebaseCache(false)}>Vider le cache local</Btn>
             <Btn variant="outline" onClick={() => signOut(auth)}>Se déconnecter</Btn>
           </div>
         </div>
