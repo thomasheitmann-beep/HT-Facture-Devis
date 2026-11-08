@@ -506,7 +506,9 @@ async function parseChiffrageDocx(file) {
 // Contenu extrait de « Gamme de Maintenance Commerciale HT Maintenance » —
 // répartition indicative des opérations par famille d'équipement, entre
 // niveaux 1-2 (exploitant) et niveaux 3-4 (HT Maintenance), selon NF X60-000.
-const GAMME_MAINTENANCE_DEFAULT = {
+// Version précédente de la gamme par défaut : sert uniquement à détecter une gamme jamais modifiée
+// pour la remplacer automatiquement par la version détaillée.
+const GAMME_MAINTENANCE_V1 = {
   "Transformateurs HTA/BT": {
     niveau12: [
       "Contrôle visuel (fuites, corrosion, déformation)",
@@ -586,6 +588,148 @@ const GAMME_MAINTENANCE_DEFAULT = {
       "Vérification du rapport de transformation des TC/TP associés",
       "Mesures de puissance active/réactive et facteur de puissance",
       "Relevé d'énergie sur durée donnée et comparaison avec la centrale de mesure interne",
+    ],
+  },
+};
+
+const GAMME_OPTION_SUFFIX = " (en option)";
+const splitGammeOption = (item) => {
+  const s = String(item || "");
+  const m = s.match(/\s*\(en option\)\s*$/i);
+  return m ? { label: s.slice(0, m.index), option: true } : { label: s, option: false };
+};
+function GammeItemLabel({ item }) {
+  const { label, option } = splitGammeOption(item);
+  return (
+    <>
+      {label}
+      {option && (
+        <span className="ml-1.5 align-middle text-[10px] uppercase tracking-wide text-amber-700 border border-amber-300 bg-amber-50 rounded px-1 py-px whitespace-nowrap">
+          en option
+        </span>
+      )}
+    </>
+  );
+}
+
+// Gamme de maintenance détaillée par famille d'équipement. Les points se terminant par
+// « (en option) » (mesures d'isolement, thermographie) ne sont réalisés que s'ils sont retenus au devis.
+const GAMME_MAINTENANCE_DEFAULT = {
+  "Transformateurs HTA/BT": {
+    niveau12: [
+      "Contrôle visuel de l'enveloppe de protection et du transformateur (fuites, corrosion, déformation, propreté)",
+      "Vérification de l'indice de protection et des mises à la terre de l'enveloppe",
+      "Transformateur immergé : contrôle du niveau d'huile et de l'état du déshydrateur à gel de silice (respirateur)",
+      "Transformateur sec : contrôle de l'état de l'enrobage et de la résine",
+      "Vérification du dégagement des distances de refroidissement et de la ventilation (y compris ventilation forcée)",
+      "Contrôle des voyants, des indicateurs et de la position des barrettes de commutation",
+      "Vérification du système de verrouillage à clé",
+    ],
+    niveau34: [
+      "Contrôle des connexions haute et basse tension, des têtes de câbles haute tension et du raccordement des sondes de température",
+      "Couples de serrage : vis de passe-barres, liaison couvercle-cuve, bouchons de remplissage et de vidange",
+      "Test des protections propres du transformateur : dégagement gazeux, pression excessive, température seuil 1 (alarme) et seuil 2 (déclenchement)",
+      "Rapport de transformation par phase (tolérance ±0,5 % selon la norme CEI 60076-1), pour chaque secondaire",
+      "Résistance des enroulements primaire et secondaire(s)",
+      "Mesure d'isolement haute tension–terre, basse tension–terre et haute tension–basse tension, avec indices de polarisation et d'absorption diélectrique (en option)",
+      "Contrôle thermographique en charge des connexions et de l'enveloppe (en option)",
+      "Transformateur immergé : analyse d'huile (rigidité diélectrique, teneur en eau, acidité, tension interfaciale, facteur de dissipation, gaz dissous, point d'éclair, teneur en PCB, furanes)",
+    ],
+  },
+  "Appareillage HTA (interrupteurs, interrupteurs-fusibles, disjoncteurs)": {
+    niveau12: [
+      "Contrôle visuel de l'état général interne et externe de la cellule, de la signalétique et de la fiche de manœuvre",
+      "Vérification des indicateurs capacitifs de présence de tension et des voyants de position",
+      "Contrôle du densimètre (cellules à isolation gazeuse SF6)",
+      "Vérification de l'accessibilité, du verrouillage et de l'interverrouillage de sécurité",
+      "Contrôle de la continuité des masses",
+    ],
+    niveau34: [
+      "Essais de manœuvre en charge et hors charge, et contrôle du verrouillage mécanique interrupteur / sectionneur de terre",
+      "Contrôle de l'état général des isolants, des connexions de puissance, des têtes de câbles et des contacts de position",
+      "Cellule interrupteur-fusibles : identification et vérification des fusibles (marque, modèle, calibre, état) et du déclenchement par percuteur",
+      "Cellule disjoncteur : moteur de réarmement, télécommande, résistance de la bobine de déclenchement, état des chambres de coupure et résistance de contact",
+      "Cellule disjoncteur : mesure des temps d'ouverture, de fermeture et du temps mécanique complet",
+      "Cellule contacteur : contrôle des contacts, des bobines de commande et du verrouillage mécanique",
+      "Relais de protection : relevé du paramétrage et test des fonctions 50/51 et 50N/51N uniquement, contrôle du circuit de mesures et de commande",
+      "Vérification des transformateurs de courant et de tension (rapport de transformation, état, raccordements)",
+      "Couples de serrage des connexions",
+      "Mesure d'isolement haute tension–terre et entre phases (en option)",
+      "Contrôle thermographique des connexions de puissance (en option)",
+    ],
+  },
+  "Disjoncteurs BT / Tableaux (TGBT, tableaux divisionnaires)": {
+    niveau12: [
+      "Contrôle visuel, propreté, absence d'échauffement ou de traces de surchauffe",
+      "Vérification de la signalétique, du schéma électrique et de la plaque signalétique",
+      "Nettoyage général externe et interne",
+      "Contrôle du serrage apparent des capots et des fixations",
+      "Manœuvres des disjoncteurs et vérification des signalisations, voyants et contacts auxiliaires",
+    ],
+    niveau34: [
+      "Contrôle des connexions de puissance, graissage des plages de raccordement et couples de serrage",
+      "Contrôle des contacts de puissance et des chambres de coupure, mesure des résistances de contact",
+      "Vérification de l'unité de contrôle, de sa tension auxiliaire et du bouton de test / réarmement",
+      "Essais des organes de manœuvre électriques : bobine d'ouverture, bobine à manque de tension, bobine de fermeture, moteur de réarmement",
+      "Disjoncteur débrochable : manœuvre d'embrochage / débrochage, verrouillage en position, contacts de position du châssis, état des pinces, cadenassage",
+      "Relevé des réglages de protection : surcharge longue, court-circuit temporisé, instantané, protection terre, différentiel",
+      "Essais de déclenchement par injection (valise d'essai) : surcharge longue, court-circuit temporisé, instantané, terre / différentiel, avec relevé de la courbe de déclenchement",
+      "Jeux de barres et gaines à barres : fixations, joints de dilatation, alignement, capots, serrage, résistance de contact aux jonctions, état des isolants",
+      "Mesure d'isolement phases–masse, entre phases et entre bornes amont et aval (en option)",
+      "Contrôle thermographique des connexions et des points chauds (en option)",
+    ],
+  },
+  "Batteries de compensation d'énergie réactive": {
+    niveau12: [
+      "Contrôle visuel des gradins, des condensateurs et des connexions (gonflement, fuites, traces d'échauffement)",
+      "Dépoussiérage de l'installation",
+      "Vérification de l'espace autour de la batterie et de la température locale",
+      "Test de fonctionnement du ventilateur (démarrage et arrêt aux seuils)",
+      "Contrôle du régulateur : affichage, alarmes et signalisations",
+    ],
+    niveau34: [
+      "Serrage des connexions par section de conducteur, état des câbles, des contacteurs et des interrupteurs",
+      "Contrôle des résistances de décharge et des gradins un par un",
+      "Réglage du facteur de puissance cible du régulateur et vérification de la correspondance entre l'affichage et la mesure réelle",
+      "Vérification de l'enclenchement des gradins en automatique et en manuel, des temporisations d'enclenchement et de réenclenchement",
+      "Mesures batterie en service puis hors service : fréquence, tensions, courants, puissances, cos φ / tan φ par phase",
+      "Analyse harmonique : harmoniques de courant et de tension au tableau général basse tension, batterie hors service puis en service, et évaluation du risque de résonance",
+      "Contrôle thermographique des connexions et des gradins (en option)",
+    ],
+  },
+  "Onduleurs, redresseurs-chargeurs, inverseurs de sources": {
+    niveau12: [
+      "Contrôle de l'état de l'installation : local, température ambiante, état de la machine et de l'environnement",
+      "Contrôle des voyants, des signalisations et de l'affichage des alarmes et défauts",
+      "Vérification de la ventilation et dépoussiérage",
+      "Contrôle de la signalétique de sécurité",
+      "Batterie : contrôle d'apparence (bornes sulfatées ou oxydées, traces de dégazage)",
+    ],
+    niveau34: [
+      "Essais d'alarmes et de défauts, contrôle de la logique de marche et des alimentations électroniques",
+      "Contrôle du contrôleur d'isolement",
+      "Essais de commutation (réseau normal vers secours, onduleur vers by-pass) et contrôle des by-pass manuels interne et externe",
+      "Inverseur de source : essai de basculement et de reprise entre les sources, contrôle des temporisations",
+      "Contrôle des reports d'alarme (contacts secs, réseau, liaison série)",
+      "Mesures réseau normal, secours et sortie : tensions, fréquence, courants, taux de distorsion, puissances, cos φ",
+      "Mesures de la batterie : tensions de floating, de repos, de charge et d'égalisation, ondulation résiduelle, relevé des tensions des éléments",
+      "Essai de décharge et d'autonomie de la batterie à puissance constante",
+      "Contrôle des pièces d'usure (ventilateurs, condensateurs, batteries)",
+      "Contrôle thermographique en charge (en option)",
+    ],
+  },
+  "Comptage HTA & bilan de puissance": {
+    niveau12: [
+      "Relevé des index et des compteurs",
+      "Contrôle visuel du coffret et des étiquettes",
+      "Vérification des scellés et plombs réglementaires",
+    ],
+    niveau34: [
+      "Contrôle des transformateurs de potentiel et du rapport de transformation des transformateurs de courant de comptage",
+      "Contrôle de l'étalonnage du compteur",
+      "Bilan de puissance : tensions simples et composées, taux de distorsion, courants (dont courant du neutre), puissances et facteur de puissance, régime de neutre, tension terre / neutre, fréquence",
+      "Relevé d'énergie sur une durée donnée et comparaison avec la centrale de mesure interne du tableau",
+      "Mesure d'isolement de la cellule de comptage (en option)",
     ],
   },
 };
@@ -2969,7 +3113,7 @@ function PrintableDoc({ type, doc, client, chantier, site, billing, settings, cg
                   <p className="text-slate-500 mb-2">
                     Répartition indicative des opérations entre surveillance et entretien courant d'une part, et contrôles,
                     mesures et essais spécialisés d'autre part, selon la norme NF X60-000 — le périmètre exact est ajusté
-                    lors du diagnostic initial.
+                    lors du diagnostic initial. Les points signalés « en option » (notamment les mesures d'isolement et la thermographie) ne sont réalisés que s'ils ont été retenus au devis.
                   </p>
                   <div className="space-y-2.5">
                     {(doc.famillesEquipement || []).map((fam) => {
@@ -2984,7 +3128,7 @@ function PrintableDoc({ type, doc, client, chantier, site, billing, settings, cg
                               <div>
                                 <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Surveillance et entretien courant</div>
                                 <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
-                                  {g.niveau12.map((item, i) => <li key={i}>{item}</li>)}
+                                  {g.niveau12.map((item, i) => <li key={i}><GammeItemLabel item={item} /></li>)}
                                 </ul>
                               </div>
                             )}
@@ -2992,7 +3136,7 @@ function PrintableDoc({ type, doc, client, chantier, site, billing, settings, cg
                               <div>
                                 <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">Contrôles, mesures et essais spécialisés</div>
                                 <ul className="list-disc pl-4 text-slate-500 space-y-0.5">
-                                  {g.niveau34.map((item, i) => <li key={i}>{item}</li>)}
+                                  {g.niveau34.map((item, i) => <li key={i}><GammeItemLabel item={item} /></li>)}
                                 </ul>
                               </div>
                             )}
@@ -5675,7 +5819,20 @@ function GammeTab({ gammeMaintenance, saveGammeMaintenance }) {
                     <div className="space-y-1.5">
                       {(data[fam]?.[niveau] || []).map((item, i) => (
                         <div key={i} className="flex items-center gap-1.5">
-                          <TextInput value={item} onChange={(e) => updateItem(fam, niveau, i, e.target.value)} className="flex-1 py-1.5 text-xs" />
+                          <TextInput
+                            value={splitGammeOption(item).label}
+                            onChange={(e) => updateItem(fam, niveau, i, e.target.value + (splitGammeOption(item).option ? GAMME_OPTION_SUFFIX : ""))}
+                            className="flex-1 py-1.5 text-xs"
+                          />
+                          <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer shrink-0" title="Point réalisé seulement s'il est retenu au devis">
+                            <input
+                              type="checkbox"
+                              checked={splitGammeOption(item).option}
+                              onChange={(e) => updateItem(fam, niveau, i, splitGammeOption(item).label + (e.target.checked ? GAMME_OPTION_SUFFIX : ""))}
+                              className="rounded border-slate-300"
+                            />
+                            Option
+                          </label>
                           <button onClick={() => removeItem(fam, niveau, i)} className="text-slate-400 hover:text-red-600 p-1"><Trash2 size={13} /></button>
                         </div>
                       ))}
@@ -5683,7 +5840,7 @@ function GammeTab({ gammeMaintenance, saveGammeMaintenance }) {
                     </div>
                   ) : (
                     <ul className="list-disc pl-4 text-sm text-slate-600 space-y-0.5">
-                      {(data[fam]?.[niveau] || []).map((item, i) => <li key={i}>{item}</li>)}
+                      {(data[fam]?.[niveau] || []).map((item, i) => <li key={i}><GammeItemLabel item={item} /></li>)}
                     </ul>
                   )}
                 </div>
@@ -6395,7 +6552,15 @@ export default function App() {
       setFournisseurs(four);
       setCommandesList(cda);
       setCgv(cgvData);
-      setGammeMaintenance(gammeData);
+      // Gamme jamais modifiée (identique à la version précédente par défaut) : on passe
+      // automatiquement à la version détaillée. Une gamme personnalisée est conservée telle quelle.
+      const gammeV1 = JSON.stringify(GAMME_MAINTENANCE_V1);
+      const gammeV1AvantRelais = gammeV1.replace(
+        "Test des relais de protection : fonctions 50/51 et 50N/51N uniquement",
+        "Contrôle et réglage des relais de protection"
+      );
+      const gammeStockee = JSON.stringify(gammeData);
+      setGammeMaintenance(gammeStockee === gammeV1 || gammeStockee === gammeV1AvantRelais ? GAMME_MAINTENANCE_DEFAULT : gammeData);
       setLoading(false);
     })();
   }, []);
